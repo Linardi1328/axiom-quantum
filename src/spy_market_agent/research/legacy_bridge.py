@@ -228,9 +228,7 @@ def _candidate_metric_snapshot(
         "median_training_prevalence_log_loss_delta": (
             summary.median_training_prevalence_log_loss_delta
         ),
-        "median_training_prevalence_brier_delta": (
-            summary.median_training_prevalence_brier_delta
-        ),
+        "median_training_prevalence_brier_delta": (summary.median_training_prevalence_brier_delta),
         "phase2_baseline_roc_auc_delta": summary.phase2_baseline_roc_auc_delta,
     }
     for name, metric in legacy_metrics.items():
