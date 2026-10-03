@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -105,7 +105,7 @@ def test_result_contract_rejects_non_finite_metrics_and_invalid_candidate_state(
         "summary": "Forward evaluation completed.",
         "conclusion": "Evidence remains research-only.",
         "metric_snapshot": {"expectancy": 0.12},
-        "completed_at": datetime(2026, 10, 4, 1, 0, tzinfo=timezone.utc),
+        "completed_at": datetime(2026, 10, 4, 1, 0, tzinfo=UTC),
     }
 
     with pytest.raises(ValidationError, match="must be finite"):
@@ -141,7 +141,7 @@ def test_research_memory_round_trips_and_is_append_only(tmp_path: Path) -> None:
         summary="Baseline completed.",
         conclusion="Keep in research.",
         metric_snapshot={"expectancy": 0.03, "max_drawdown": -0.08},
-        completed_at=datetime(2026, 10, 4, 1, 0, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 10, 4, 1, 0, tzinfo=UTC),
     )
     first_result_id = registry.record_result(first_result)
     assert registry.record_result(first_result) == first_result_id
@@ -150,7 +150,7 @@ def test_research_memory_round_trips_and_is_append_only(tmp_path: Path) -> None:
     second_result = first_result.model_copy(
         update={
             "summary": "Independent rerun completed.",
-            "completed_at": datetime(2026, 10, 4, 2, 0, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 10, 4, 2, 0, tzinfo=UTC),
         }
     )
     second_result_id = registry.record_result(second_result)
@@ -171,7 +171,7 @@ def test_registry_rejects_result_for_unknown_experiment(tmp_path: Path) -> None:
         summary="Could not execute research safely.",
         conclusion="Rejected.",
         metric_snapshot={},
-        completed_at=datetime(2026, 10, 4, 1, 0, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 10, 4, 1, 0, tzinfo=UTC),
     )
 
     with pytest.raises(ResearchArtifactError) as exc_info:
