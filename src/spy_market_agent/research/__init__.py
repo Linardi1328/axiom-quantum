@@ -60,6 +60,11 @@ from spy_market_agent.research.leakage import (
     validate_supervised_leakage_contract,
     validate_training_only_fit_scope,
 )
+from spy_market_agent.research.legacy_bridge import (
+    phase3_candidate_result,
+    phase3_experiment_definition,
+    record_phase3_candidate_evidence,
+)
 from spy_market_agent.research.memory import ResearchMemoryRegistry
 from spy_market_agent.research.metrics import (
     aggregate_metric,
@@ -213,8 +218,11 @@ __all__ = [
     "fit_naive_scenario_baseline",
     "fold_manifest_identity",
     "load_research_campaign_config",
+    "phase3_candidate_result",
+    "phase3_experiment_definition",
     "planned_trials_from_grid",
     "rank_classification_candidates",
+    "record_phase3_candidate_evidence",
     "required_classification_baselines",
     "run_development_campaign",
     "strategy_threshold_policy",
