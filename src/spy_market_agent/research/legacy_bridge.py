@@ -16,6 +16,7 @@ from spy_market_agent.research.experiment_core import (
     ResearchRuntimeLineage,
     StrategyResearchState,
 )
+from spy_market_agent.research.identity import experiment_identity as legacy_experiment_identity
 from spy_market_agent.research.memory import ResearchMemoryRegistry
 from spy_market_agent.research.models import (
     CandidateEvaluationSummary,
@@ -47,6 +48,12 @@ def _revalidate_manifest(manifest: ExperimentManifest) -> ExperimentManifest:
             ResearchRegistryError,
             "invalid_phase3_manifest",
             "legacy Phase 3 experiment manifest failed canonical revalidation.",
+        )
+    if legacy_experiment_identity(validated) != validated.experiment_id:
+        raise_research_error(
+            ResearchRegistryError,
+            "legacy_experiment_identity_mismatch",
+            "legacy Phase 3 experiment_id must match its canonical manifest content.",
         )
     protected = validated.protected_evaluation_status
     if protected.protected_labels_loaded or protected.state in {"accessed", "completed"}:
