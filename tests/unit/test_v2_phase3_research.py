@@ -393,7 +393,7 @@ def test_phase3_bridge_records_idempotent_evidence_in_axiom_memory(tmp_path: Pat
 
 def test_phase3_bridge_rejects_protected_or_identity_mismatched_legacy_evidence() -> None:
     manifest = _bridge_experiment_manifest()
-    protected = manifest.model_copy(
+    protected_without_identity = manifest.model_copy(
         update={
             "protected_evaluation_status": ProtectedEvaluationStatus(
                 state="accessed",
@@ -402,7 +402,10 @@ def test_phase3_bridge_rejects_protected_or_identity_mismatched_legacy_evidence(
             )
         }
     )
-    with pytest.raises(ResearchRegistryError, match="legacy_experiment_identity_mismatch"):
+    protected = protected_without_identity.model_copy(
+        update={"experiment_id": experiment_identity(protected_without_identity)}
+    )
+    with pytest.raises(ResearchRegistryError, match="protected_phase3_evidence_not_bridgeable"):
         phase3_experiment_definition(protected)
 
     tampered = manifest.model_copy(update={"random_seeds": (99,)})
