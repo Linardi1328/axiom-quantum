@@ -28,6 +28,13 @@ class ResearchMemoryRegistry:
             definition.model_dump(mode="python")
         )
         experiment_id = experiment_identity(canonical_definition)
+        manifest_path = self.store.artifact_path(
+            experiment_id,
+            AXIOM_EXPERIMENT_MANIFEST_NAME,
+        )
+        if manifest_path.exists():
+            self.load_experiment(experiment_id)
+            return experiment_id
         record = StoredExperiment(
             experiment_id=experiment_id,
             definition=canonical_definition,
