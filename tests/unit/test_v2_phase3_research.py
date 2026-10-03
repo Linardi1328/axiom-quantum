@@ -31,6 +31,7 @@ from spy_market_agent.research import (
     ResearchArtifactStore,
     ResearchMemoryRegistry,
     StrategyResearchState,
+    axiom_experiment_identity,
     TransformationFitRecord,
     ablation_scaffold,
     aggregate_metric,
@@ -237,7 +238,10 @@ def _experiment_manifest() -> ExperimentManifest:
     )
 
 
-def _bridge_experiment_manifest() -> ExperimentManifest:
+def _bridge_experiment_manifest(
+    *,
+    random_seeds: tuple[int, ...] = (42,),
+) -> ExperimentManifest:
     runtime = _runtime_lineage("abc1234")
     fold_manifest = construct_walk_forward_manifest(
         _supervised_dataset(),
@@ -256,6 +260,7 @@ def _bridge_experiment_manifest() -> ExperimentManifest:
         model_definition=logistic,
         created_at=CREATED_AT,
         candidate_selection_config=_selection_config(),
+        random_seeds=random_seeds,
     )
 
 
@@ -297,6 +302,112 @@ def _candidate_selection(*, promotion_allowed: bool) -> CandidateSelectionResult
         ),
         ranked_candidates=("legacy-logistic-candidate",),
     )
+
+
+def test_phase3_bridge_preserves_identity_and_scientific_sensitivity() -> None:
+    first = phase3_experiment_definition(_bridge_experiment_manifest(random_seeds=(42,)))
+    second = phase3_experiment_definition(_bridge_experiment_manifest(random_seeds=(42,)))
+    changed = phase3_experiment_definition(_bridge_experiment_manifest(random_seeds=(7,)))
+
+    assert axiom_experiment_identity(first) == axiom_experiment_identity(second)
+    assert axiom_experiment_identity(first) != axiom_experiment_identity(changed)
+    assert first.execution_authority == "none"
+    assert first.asset_universe == ("SPY",)
+    assert first.tags[0] == "legacy-phase3"
+
+
+def test_phase3_bridge_maps_promotion_only_to_validation_candidate() -> None:
+    definition = phase3_experiment_definition(_bridge_experiment_manifest())
+    result = phase3_candidate_result(
+        experiment_id=axiom_experiment_identity(definition),
+        summary=_candidate_summary(),
+        selection=_candidate_selection(promotion_allowed=True),
+        completed_at=CREATED_AT,
+    )
+
+    assert result.lifecycle_state == ExperimentLifecycleState.COMPLETED
+    assert result.outcome == ExperimentOutcome.COMPLETED
+    assert result.strategy_state == StrategyResearchState.VALIDATION_CANDIDATE
+    assert result.metric_snapshot["median_roc_auc"] == 0.61
+
+
+def test_phase3_bridge_keeps_non_promoted_candidate_research_only_and_omits_undefined() -> None:
+    definition = phase3_experiment_definition(_bridge_experiment_manifest())
+    result = phase3_candidate_result(
+        experiment_id=axiom_experiment_identity(definition),
+        summary=_candidate_summary(undefined_log_loss=True),
+        selection=_candidate_selection(promotion_allowed=False),
+        completed_at=CREATED_AT,
+    )
+
+    assert result.lifecycle_state == ExperimentLifecycleState.COMPLETED
+    assert result.outcome == ExperimentOutcome.INCONCLUSIVE
+    assert result.strategy_state == StrategyResearchState.RESEARCH_ONLY
+    assert "median_log_loss" not in result.metric_snapshot
+
+
+def test_phase3_bridge_rejects_invalid_or_leaky_candidate_evidence() -> None:
+    definition = phase3_experiment_definition(_bridge_experiment_manifest())
+    result = phase3_candidate_result(
+        experiment_id=axiom_experiment_identity(definition),
+        summary=_candidate_summary(valid=False, leaky=True, lineage_complete=False),
+        selection=_candidate_selection(promotion_allowed=True),
+        completed_at=CREATED_AT,
+    )
+
+    assert result.lifecycle_state == ExperimentLifecycleState.REJECTED
+    assert result.outcome == ExperimentOutcome.REJECTED
+    assert result.strategy_state == StrategyResearchState.REJECTED
+
+
+def test_phase3_bridge_records_idempotent_evidence_in_axiom_memory(tmp_path: Path) -> None:
+    registry = ResearchMemoryRegistry(
+        ResearchArtifactStore(
+            Path("artifacts/research"),
+            repository_root=tmp_path,
+        )
+    )
+    manifest = _bridge_experiment_manifest()
+    summary = _candidate_summary()
+    selection = _candidate_selection(promotion_allowed=True)
+
+    first = record_phase3_candidate_evidence(
+        registry=registry,
+        manifest=manifest,
+        summary=summary,
+        selection=selection,
+        completed_at=CREATED_AT,
+    )
+    second = record_phase3_candidate_evidence(
+        registry=registry,
+        manifest=manifest,
+        summary=summary,
+        selection=selection,
+        completed_at=CREATED_AT,
+    )
+
+    assert second == first
+    assert registry.list_experiment_ids() == (first[0],)
+    assert registry.list_result_ids(first[0]) == (first[1],)
+
+
+def test_phase3_bridge_rejects_protected_or_identity_mismatched_legacy_evidence() -> None:
+    manifest = _bridge_experiment_manifest()
+    protected = manifest.model_copy(
+        update={
+            "protected_evaluation_status": ProtectedEvaluationStatus(
+                state="accessed",
+                owner_acknowledged=True,
+                protected_labels_loaded=True,
+            )
+        }
+    )
+    with pytest.raises(ResearchRegistryError, match="legacy_experiment_identity_mismatch"):
+        phase3_experiment_definition(protected)
+
+    tampered = manifest.model_copy(update={"random_seeds": (99,)})
+    with pytest.raises(ResearchRegistryError, match="legacy_experiment_identity_mismatch"):
+        phase3_experiment_definition(tampered)
 
 
 def test_expanding_walk_forward_folds_preserve_exact_boundaries_and_final_partial() -> None:
