@@ -80,6 +80,20 @@ def test_experiment_identity_is_deterministic_and_ignores_operator_notes() -> No
     assert experiment_identity(first).startswith("aq-exp-")
 
 
+def test_register_experiment_is_idempotent_across_operator_note_edits(
+    tmp_path: Path,
+) -> None:
+    registry = _registry(tmp_path)
+    first = _definition(notes="owner note one")
+    second = _definition(notes="owner note two")
+
+    first_id = registry.register_experiment(first)
+    second_id = registry.register_experiment(second)
+
+    assert second_id == first_id
+    assert registry.load_experiment(first_id).definition == first
+
+
 def test_experiment_identity_changes_with_scientific_lineage() -> None:
     assert experiment_identity(_definition(checksum="a" * 64)) != experiment_identity(
         _definition(checksum="b" * 64)
