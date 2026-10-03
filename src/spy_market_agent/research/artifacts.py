@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from spy_market_agent.benchmark.artifacts import canonical_json_bytes, sha256_bytes
 from spy_market_agent.research.constants import RESEARCH_ARTIFACT_ROOT
@@ -10,7 +12,7 @@ from spy_market_agent.research.errors import ResearchArtifactError, raise_resear
 
 
 class ResearchArtifactStore:
-    """Safe deterministic store for ignored Phase 3 research artifacts."""
+    """Safe deterministic store for ignored research artifacts."""
 
     def __init__(
         self,
@@ -53,6 +55,58 @@ class ResearchArtifactStore:
             allow_replace=allow_replace,
         )
         return checksum
+
+    def read_json(self, experiment_id: str, name: str) -> dict[str, Any]:
+        path = self.artifact_path(experiment_id, name)
+        if not path.exists() or not path.is_file() or path.is_symlink():
+            raise_research_error(
+                ResearchArtifactError,
+                "research_artifact_missing",
+                f"required research artifact is missing: {name}",
+            )
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise_research_error(
+                ResearchArtifactError,
+                "research_artifact_json_load_failed",
+                f"research artifact JSON could not be loaded: {name}",
+            )
+        if not isinstance(payload, dict):
+            raise_research_error(
+                ResearchArtifactError,
+                "research_artifact_json_not_object",
+                f"research artifact JSON must be an object: {name}",
+            )
+        return payload
+
+    def checksum(self, experiment_id: str, name: str) -> str:
+        path = self.artifact_path(experiment_id, name)
+        if not path.exists() or not path.is_file() or path.is_symlink():
+            raise_research_error(
+                ResearchArtifactError,
+                "research_artifact_missing",
+                f"required research artifact is missing: {name}",
+            )
+        return sha256_bytes(path.read_bytes())
+
+    def existing_artifacts(self, experiment_id: str) -> tuple[str, ...]:
+        directory = self.experiment_dir(experiment_id)
+        if not directory.exists():
+            return ()
+        if directory.is_symlink() or not directory.is_dir():
+            raise_research_error(
+                ResearchArtifactError,
+                "invalid_research_experiment_directory",
+                "research experiment path must be a real directory.",
+            )
+        return tuple(
+            sorted(
+                path.name
+                for path in directory.iterdir()
+                if path.is_file() and not path.is_symlink()
+            )
+        )
 
     def write_bytes(
         self,
@@ -127,7 +181,7 @@ class ResearchArtifactStore:
             or not value.strip()
             or value.startswith(".")
             or "/" in value
-            or "\\" in value
+            or "\" in value
             or ".." in Path(value).parts
         ):
             raise_research_error(
