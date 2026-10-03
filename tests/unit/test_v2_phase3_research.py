@@ -26,7 +26,11 @@ from spy_market_agent.research import (
     MINIMUM_FINAL_ASSESSMENT_ROWS,
     MINIMUM_INITIAL_TRAINING_ROWS,
     NO_CANDIDATE_PROMOTION,
+    ExperimentLifecycleState,
+    ExperimentOutcome,
     ResearchArtifactStore,
+    ResearchMemoryRegistry,
+    StrategyResearchState,
     TransformationFitRecord,
     ablation_scaffold,
     aggregate_metric,
@@ -41,8 +45,11 @@ from spy_market_agent.research import (
     deny_protected_label_access,
     diagnostic_threshold_policy,
     experiment_identity,
+    phase3_candidate_result,
+    phase3_experiment_definition,
     planned_trials_from_grid,
     rank_classification_candidates,
+    record_phase3_candidate_evidence,
     strategy_threshold_policy,
     validate_no_forbidden_feature_columns,
     validate_phase2_final_test_isolation,
@@ -73,6 +80,7 @@ from spy_market_agent.research.models import (
     CalibrationSplit,
     CandidateEvaluationSummary,
     CandidateSelectionConfig,
+    CandidateSelectionResult,
     ClassificationMetricSet,
     DatasetLineage,
     ExperimentManifest,
@@ -226,6 +234,68 @@ def _experiment_manifest() -> ExperimentManifest:
         model_definition=logistic,
         created_at=CREATED_AT,
         candidate_selection_config=_selection_config(),
+    )
+
+
+def _bridge_experiment_manifest() -> ExperimentManifest:
+    runtime = _runtime_lineage("abc1234")
+    fold_manifest = construct_walk_forward_manifest(
+        _supervised_dataset(),
+        dataset_lineage=_dataset_lineage(),
+        runtime_lineage=runtime,
+    )
+    logistic = next(
+        model
+        for model in baseline_model_registry().models
+        if model.model_name == LOGISTIC_REGRESSION_MODEL
+    )
+    return build_experiment_manifest(
+        dataset_lineage=_dataset_lineage(),
+        fold_manifest=fold_manifest,
+        runtime_lineage=runtime,
+        model_definition=logistic,
+        created_at=CREATED_AT,
+        candidate_selection_config=_selection_config(),
+    )
+
+
+def _candidate_summary(
+    *,
+    valid: bool = True,
+    leaky: bool = False,
+    lineage_complete: bool = True,
+    undefined_log_loss: bool = False,
+) -> CandidateEvaluationSummary:
+    return CandidateEvaluationSummary(
+        candidate_name="legacy-logistic-candidate",
+        valid=valid,
+        leaky=leaky,
+        lineage_complete=lineage_complete,
+        simplicity_rank=10,
+        valid_fold_count=3,
+        median_roc_auc=MetricValue(value=0.61),
+        median_log_loss=MetricValue(
+            value=None if undefined_log_loss else 0.66,
+            undefined_reason="undefined synthetic metric" if undefined_log_loss else None,
+        ),
+        median_brier_score=MetricValue(value=0.23),
+        worst_quartile_roc_auc=MetricValue(value=0.55),
+        median_training_prevalence_log_loss_delta=MetricValue(value=0.02),
+        median_training_prevalence_brier_delta=MetricValue(value=0.01),
+        phase2_baseline_roc_auc_delta=MetricValue(value=0.03),
+    )
+
+
+def _candidate_selection(*, promotion_allowed: bool) -> CandidateSelectionResult:
+    return CandidateSelectionResult(
+        selected_candidate_name="legacy-logistic-candidate",
+        promotion_allowed=promotion_allowed,
+        reason=(
+            "candidate satisfies Phase 3 promotion gates"
+            if promotion_allowed
+            else "candidate remains development-only"
+        ),
+        ranked_candidates=("legacy-logistic-candidate",),
     )
 
 
