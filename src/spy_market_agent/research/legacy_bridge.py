@@ -16,6 +16,7 @@ from spy_market_agent.research.experiment_core import (
     ResearchEvidenceRef,
     ResearchRuntimeLineage,
     StrategyResearchState,
+    experiment_identity as axiom_experiment_identity,
 )
 from spy_market_agent.research.identity import experiment_identity as legacy_experiment_identity
 from spy_market_agent.research.memory import ResearchMemoryRegistry
@@ -239,7 +240,7 @@ def _candidate_metric_snapshot(
     return metrics
 
 
-def phase3_candidate_result(
+def _phase3_candidate_result_for_experiment(
     *,
     experiment_id: str,
     summary: CandidateEvaluationSummary,
@@ -247,8 +248,6 @@ def phase3_candidate_result(
     completed_at: datetime,
     evidence: tuple[ResearchEvidenceRef, ...] = (),
 ) -> ExperimentResult:
-    """Translate one legacy candidate conclusion without granting execution authority."""
-
     validated_summary = _revalidate_summary(summary)
     validated_selection = _revalidate_selection(selection)
     evidence_valid = (
@@ -300,6 +299,26 @@ def phase3_candidate_result(
     )
 
 
+def phase3_candidate_result(
+    *,
+    manifest: ExperimentManifest,
+    summary: CandidateEvaluationSummary,
+    selection: CandidateSelectionResult,
+    completed_at: datetime,
+    evidence: tuple[ResearchEvidenceRef, ...] = (),
+) -> ExperimentResult:
+    """Translate one legacy candidate conclusion and bind it to its canonical experiment."""
+
+    definition = phase3_experiment_definition(manifest)
+    return _phase3_candidate_result_for_experiment(
+        experiment_id=axiom_experiment_identity(definition),
+        summary=summary,
+        selection=selection,
+        completed_at=completed_at,
+        evidence=evidence,
+    )
+
+
 def record_phase3_candidate_evidence(
     *,
     registry: ResearchMemoryRegistry,
@@ -313,7 +332,7 @@ def record_phase3_candidate_evidence(
 
     definition = phase3_experiment_definition(manifest)
     experiment_id = registry.register_experiment(definition)
-    result = phase3_candidate_result(
+    result = _phase3_candidate_result_for_experiment(
         experiment_id=experiment_id,
         summary=summary,
         selection=selection,
