@@ -317,14 +317,16 @@ def test_phase3_bridge_preserves_identity_and_scientific_sensitivity() -> None:
 
 
 def test_phase3_bridge_maps_promotion_only_to_validation_candidate() -> None:
-    definition = phase3_experiment_definition(_bridge_experiment_manifest())
+    manifest = _bridge_experiment_manifest()
+    definition = phase3_experiment_definition(manifest)
     result = phase3_candidate_result(
-        experiment_id=axiom_experiment_identity(definition),
+        manifest=manifest,
         summary=_candidate_summary(),
         selection=_candidate_selection(promotion_allowed=True),
         completed_at=CREATED_AT,
     )
 
+    assert result.experiment_id == axiom_experiment_identity(definition)
     assert result.lifecycle_state == ExperimentLifecycleState.COMPLETED
     assert result.outcome == ExperimentOutcome.COMPLETED
     assert result.strategy_state == StrategyResearchState.VALIDATION_CANDIDATE
@@ -332,9 +334,8 @@ def test_phase3_bridge_maps_promotion_only_to_validation_candidate() -> None:
 
 
 def test_phase3_bridge_keeps_non_promoted_candidate_research_only_and_omits_undefined() -> None:
-    definition = phase3_experiment_definition(_bridge_experiment_manifest())
     result = phase3_candidate_result(
-        experiment_id=axiom_experiment_identity(definition),
+        manifest=_bridge_experiment_manifest(),
         summary=_candidate_summary(undefined_log_loss=True),
         selection=_candidate_selection(promotion_allowed=False),
         completed_at=CREATED_AT,
@@ -347,9 +348,8 @@ def test_phase3_bridge_keeps_non_promoted_candidate_research_only_and_omits_unde
 
 
 def test_phase3_bridge_rejects_invalid_or_leaky_candidate_evidence() -> None:
-    definition = phase3_experiment_definition(_bridge_experiment_manifest())
     result = phase3_candidate_result(
-        experiment_id=axiom_experiment_identity(definition),
+        manifest=_bridge_experiment_manifest(),
         summary=_candidate_summary(valid=False, leaky=True, lineage_complete=False),
         selection=_candidate_selection(promotion_allowed=True),
         completed_at=CREATED_AT,
