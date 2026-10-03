@@ -114,7 +114,7 @@ class ResearchMemoryRegistry:
 
     @staticmethod
     def _result_name(result_id: str) -> str:
-        if not result_id.startswith("aq-result-") or "/" in result_id or "\" in result_id:
+        if not result_id.startswith("aq-result-") or "/" in result_id or "\\" in result_id:
             raise_research_error(
                 ResearchRegistryError,
                 "invalid_axiom_result_id",
