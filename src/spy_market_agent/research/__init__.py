@@ -24,6 +24,28 @@ from spy_market_agent.research.constants import (
     PHASE3_PHASE_ID,
     WALK_FORWARD_FOLD_POLICY_ID,
 )
+from spy_market_agent.research.experiment_core import (
+    AXIOM_EXPERIMENT_ID_VERSION,
+    AXIOM_EXPERIMENT_SCHEMA_VERSION,
+    AXIOM_RESULT_ID_VERSION,
+    AXIOM_RESULT_SCHEMA_VERSION,
+    ExperimentDefinition,
+    ExperimentLifecycleState,
+    ExperimentOutcome,
+    ExperimentResult,
+    ResearchDatasetRef,
+    ResearchEvidenceRef,
+    ResearchRuntimeLineage,
+    StoredExperiment,
+    StoredExperimentResult,
+    StrategyResearchState,
+)
+from spy_market_agent.research.experiment_core import (
+    experiment_identity as axiom_experiment_identity,
+)
+from spy_market_agent.research.experiment_core import (
+    result_identity as axiom_result_identity,
+)
 from spy_market_agent.research.folds import construct_walk_forward_manifest
 from spy_market_agent.research.hyperparameters import (
     planned_trials_from_grid,
@@ -38,6 +60,7 @@ from spy_market_agent.research.leakage import (
     validate_supervised_leakage_contract,
     validate_training_only_fit_scope,
 )
+from spy_market_agent.research.memory import ResearchMemoryRegistry
 from spy_market_agent.research.metrics import (
     aggregate_metric,
     calculate_research_classification_metrics,
@@ -104,6 +127,10 @@ from spy_market_agent.research.thresholds import (
 )
 
 __all__ = [
+    "AXIOM_EXPERIMENT_ID_VERSION",
+    "AXIOM_EXPERIMENT_SCHEMA_VERSION",
+    "AXIOM_RESULT_ID_VERSION",
+    "AXIOM_RESULT_SCHEMA_VERSION",
     "BOUNDARY_EXCLUSION_SESSIONS",
     "DEFAULT_ASSESSMENT_WINDOW_ROWS",
     "DEFAULT_STEP_ROWS",
@@ -133,9 +160,17 @@ __all__ = [
     "PHASE3_ARTIFACT_SCHEMA_VERSION",
     "PHASE3_PHASE_ID",
     "WALK_FORWARD_FOLD_POLICY_ID",
+    "ExperimentDefinition",
+    "ExperimentLifecycleState",
+    "ExperimentOutcome",
+    "ExperimentResult",
     "FeatureGenerationPolicy",
     "ResearchArtifactStore",
     "ResearchCampaignConfig",
+    "ResearchDatasetRef",
+    "ResearchEvidenceRef",
+    "ResearchMemoryRegistry",
+    "ResearchRuntimeLineage",
     "ScenarioBaseline",
     "ScenarioBaselineBenchmark",
     "ScenarioBaselineEvaluation",
@@ -148,10 +183,15 @@ __all__ = [
     "ScenarioEvaluationMetrics",
     "ScenarioLabel",
     "ScenarioLabelSet",
+    "StoredExperiment",
+    "StoredExperimentResult",
+    "StrategyResearchState",
     "TransformationFitRecord",
     "ablation_scaffold",
     "aggregate_metric",
     "assert_protected_evaluation_not_accessed",
+    "axiom_experiment_identity",
+    "axiom_result_identity",
     "baseline_feature_registry",
     "baseline_model_registry",
     "build_calibration_split",
