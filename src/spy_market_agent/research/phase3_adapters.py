@@ -17,7 +17,11 @@ from spy_market_agent.research.experiment_core import (
     ResearchRuntimeLineage,
     StrategyResearchState,
 )
-from spy_market_agent.research.models import CandidateSelectionResult, ExperimentManifest, RuntimeLineage
+from spy_market_agent.research.models import (
+    CandidateSelectionResult,
+    ExperimentManifest,
+    RuntimeLineage,
+)
 
 PHASE3_MIGRATION_TAG = "migration:phase3"
 _CANONICAL_GIT_SHA = re.compile(r"^[0-9a-f]{7,64}$")
