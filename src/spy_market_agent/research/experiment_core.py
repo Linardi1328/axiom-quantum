@@ -98,7 +98,7 @@ class ResearchDatasetRef(BaseModel):
     @field_validator("dataset_id", "feature_schema", "label_schema")
     @classmethod
     def _safe_identifiers(cls, value: str, info: ValidationInfo) -> str:
-        field_name = info.field_name
+        field_name = info.field_name or "identifier"
         return _require_safe_identifier(value, field_name=field_name)
 
     @field_validator("checksum")
@@ -133,7 +133,7 @@ class ResearchRuntimeLineage(BaseModel):
     @field_validator("package_version", "python_version")
     @classmethod
     def _lineage_text(cls, value: str, info: ValidationInfo) -> str:
-        field_name = info.field_name
+        field_name = info.field_name or "lineage"
         return _require_text(value, field_name=field_name)
 
     @field_validator("dependency_versions")
@@ -155,7 +155,7 @@ class ExperimentDefinition(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-research-experiment-v1"] = AXIOM_EXPERIMENT_SCHEMA_VERSION
+    schema_version: Literal["axiom-research-experiment-v1"] = "axiom-research-experiment-v1"
     name: str
     hypothesis: str
     research_question: str
@@ -175,13 +175,13 @@ class ExperimentDefinition(BaseModel):
     @field_validator("name", "hypothesis", "research_question")
     @classmethod
     def _required_text(cls, value: str, info: ValidationInfo) -> str:
-        field_name = info.field_name
+        field_name = info.field_name or "text"
         return _require_text(value, field_name=field_name)
 
     @field_validator("evaluation_protocol", "cost_model_id")
     @classmethod
     def _safe_single_identifiers(cls, value: str, info: ValidationInfo) -> str:
-        field_name = info.field_name
+        field_name = info.field_name or "identifier"
         return _require_safe_identifier(value, field_name=field_name)
 
     @field_validator("asset_universe")
@@ -210,7 +210,7 @@ class ExperimentDefinition(BaseModel):
     @field_validator("feature_families", "strategy_ids", "model_ids", "tags")
     @classmethod
     def _identifier_tuples(cls, value: tuple[str, ...], info: ValidationInfo) -> tuple[str, ...]:
-        field_name = info.field_name
+        field_name = info.field_name or "identifiers"
         _unique_tuple(value, field_name=field_name)
         for item in value:
             _require_safe_identifier(item, field_name=field_name)
@@ -265,7 +265,7 @@ class ExperimentResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-research-result-v1"] = AXIOM_RESULT_SCHEMA_VERSION
+    schema_version: Literal["axiom-research-result-v1"] = "axiom-research-result-v1"
     experiment_id: str
     lifecycle_state: Literal[
         ExperimentLifecycleState.COMPLETED,
@@ -290,7 +290,7 @@ class ExperimentResult(BaseModel):
     @field_validator("summary", "conclusion")
     @classmethod
     def _result_text(cls, value: str, info: ValidationInfo) -> str:
-        field_name = info.field_name
+        field_name = info.field_name or "result text"
         return _require_text(value, field_name=field_name)
 
     @field_validator("metric_snapshot")
