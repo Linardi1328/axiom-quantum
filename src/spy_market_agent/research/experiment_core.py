@@ -75,7 +75,7 @@ def _unique_tuple(values: tuple[str, ...], *, field_name: str) -> tuple[str, ...
 
 
 def _validate_relative_path(value: str) -> str:
-    if not value.strip() or "\" in value:
+    if not value.strip() or "\\" in value:
         msg = "relative_path must be a nonempty POSIX-style relative path."
         raise ValueError(msg)
     path = PurePosixPath(value)
