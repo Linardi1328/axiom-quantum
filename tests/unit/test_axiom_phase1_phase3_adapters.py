@@ -168,6 +168,7 @@ def test_phase3_manifest_adapter_preserves_scientific_lineage() -> None:
     assert first.datasets[0].checksum == manifest.dataset_lineage.canonical_dataset_checksum
     assert first.runtime_lineage.git_commit_sha == manifest.runtime_lineage.git_commit_sha
     assert first.evaluation_protocol == manifest.fold_policy_id
+    assert manifest.cost_assumptions is not None
     assert first.cost_model_id == manifest.cost_assumptions.cost_scenario
     assert PHASE3_MIGRATION_TAG in first.tags
     assert f"source:{manifest.experiment_id}" in first.tags
