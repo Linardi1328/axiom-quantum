@@ -32,10 +32,14 @@ COMPLETED_AT = datetime(2026, 10, 4, 4, tzinfo=UTC)
 
 
 def _value(value: float | None, reason: str | None = None) -> MetricValue:
+    """Build a compact metric value for adapter fixtures."""
+
     return MetricValue(value=value, undefined_reason=reason)
 
 
-def _manifest() -> ExperimentManifest:
+def _manifest(*, git_commit_sha: str = "abc1234") -> ExperimentManifest:
+    """Build the minimal validated legacy manifest surface required by the adapter."""
+
     lineage = DatasetLineage(
         dataset_id="synthetic-phase3-dataset",
         canonical_dataset_checksum="a" * 64,
@@ -47,7 +51,7 @@ def _manifest() -> ExperimentManifest:
         last_session=date(2026, 9, 30),
     )
     runtime = RuntimeLineage(
-        git_commit_sha="abc1234",
+        git_commit_sha=git_commit_sha,
         package_version="2.0.0b1",
         python_version="3.12.14",
         dependency_versions={"pydantic": "2.13.4"},
@@ -104,9 +108,12 @@ def _summary(
     valid: bool = True,
     leaky: bool = False,
     lineage_complete: bool = True,
+    candidate_name: str = "candidate-a",
 ) -> CandidateEvaluationSummary:
+    """Build a representative Phase-3 candidate summary."""
+
     return CandidateEvaluationSummary(
-        candidate_name="candidate-a",
+        candidate_name=candidate_name,
         valid=valid,
         leaky=leaky,
         lineage_complete=lineage_complete,
@@ -127,6 +134,8 @@ def _evaluation(
     summary: CandidateEvaluationSummary | None = None,
     fold_statuses: tuple[str, ...] = ("completed", "completed", "completed"),
 ) -> CandidateEvaluation:
+    """Build a candidate evaluation with configurable fold evidence."""
+
     return CandidateEvaluation(
         candidate_name="candidate-a",
         candidate_kind="model_candidate",
@@ -147,7 +156,20 @@ def _evaluation(
     )
 
 
+def _promoted_selection() -> CandidateSelectionResult:
+    """Build a selection result that promotes candidate-a."""
+
+    return CandidateSelectionResult(
+        selected_candidate_name="candidate-a",
+        promotion_allowed=True,
+        reason="candidate satisfies Phase 3 promotion gates",
+        ranked_candidates=("candidate-a",),
+    )
+
+
 def test_phase3_manifest_adapter_preserves_scientific_lineage() -> None:
+    """Canonical migration should preserve scientific and runtime lineage."""
+
     manifest = _manifest()
 
     first = phase3_manifest_to_axiom_experiment(
@@ -175,18 +197,31 @@ def test_phase3_manifest_adapter_preserves_scientific_lineage() -> None:
     assert first.execution_authority == "none"
 
 
+def test_phase3_manifest_adapter_losslessly_migrates_legacy_git_reference() -> None:
+    """Legacy non-hex Git references should remain recoverable and identity-sensitive."""
+
+    manifest = _manifest(git_commit_sha="unavailable")
+    result = phase3_manifest_to_axiom_experiment(
+        manifest,
+        name="Legacy lineage migration",
+        hypothesis="Legacy lineage should migrate without information loss.",
+        research_question="Can a non-canonical Git reference be retained safely?",
+    )
+
+    assert result.runtime_lineage.git_commit_sha != "unavailable"
+    assert len(result.runtime_lineage.git_commit_sha) == 64
+    assert "legacy_git_commit_ref_b64:dW5hdmFpbGFibGU" in result.notes
+
+
 def test_phase3_promoted_candidate_maps_to_validation_candidate_and_omits_undefined_metrics() -> (
     None
 ):
+    """A valid selected candidate should become validation-only with finite metrics."""
+
     result = phase3_candidate_to_axiom_result(
         experiment_id="aq-exp-111111111111111111111111",
         evaluation=_evaluation(summary=_summary()),
-        selection=CandidateSelectionResult(
-            selected_candidate_name="candidate-a",
-            promotion_allowed=True,
-            reason="candidate satisfies Phase 3 promotion gates",
-            ranked_candidates=("candidate-a",),
-        ),
+        selection=_promoted_selection(),
         completed_at=COMPLETED_AT,
     )
 
@@ -197,21 +232,49 @@ def test_phase3_promoted_candidate_maps_to_validation_candidate_and_omits_undefi
 
 
 def test_phase3_invalid_candidate_cannot_map_to_validation_candidate() -> None:
+    """Leaky candidates must fail closed even if a selection record claims promotion."""
+
     with pytest.raises(ResearchRegistryError, match="invalid_phase3_promotion_mapping"):
         phase3_candidate_to_axiom_result(
             experiment_id="aq-exp-222222222222222222222222",
             evaluation=_evaluation(summary=_summary(leaky=True)),
+            selection=_promoted_selection(),
+            completed_at=COMPLETED_AT,
+        )
+
+
+def test_phase3_candidate_rejects_mismatched_summary_identity() -> None:
+    """A summary from another candidate must never back the current result."""
+
+    with pytest.raises(ResearchRegistryError, match="phase3_candidate_summary_identity_mismatch"):
+        phase3_candidate_to_axiom_result(
+            experiment_id="aq-exp-444444444444444444444444",
+            evaluation=_evaluation(summary=_summary(candidate_name="candidate-b")),
             selection=CandidateSelectionResult(
-                selected_candidate_name="candidate-a",
-                promotion_allowed=True,
-                reason="synthetic inconsistent selection",
-                ranked_candidates=("candidate-a",),
+                selected_candidate_name=None,
+                promotion_allowed=False,
+                reason="NO CANDIDATE PROMOTION",
+                ranked_candidates=(),
             ),
             completed_at=COMPLETED_AT,
         )
 
 
+def test_phase3_zero_fold_candidate_cannot_map_to_validation_candidate() -> None:
+    """Promotion requires at least one completed fold of evidence."""
+
+    with pytest.raises(ResearchRegistryError, match="invalid_phase3_promotion_mapping"):
+        phase3_candidate_to_axiom_result(
+            experiment_id="aq-exp-555555555555555555555555",
+            evaluation=_evaluation(summary=_summary(), fold_statuses=()),
+            selection=_promoted_selection(),
+            completed_at=COMPLETED_AT,
+        )
+
+
 def test_phase3_incomplete_candidate_remains_research_only_and_inconclusive() -> None:
+    """Partial fold completion should remain inconclusive and research-only."""
+
     result = phase3_candidate_to_axiom_result(
         experiment_id="aq-exp-333333333333333333333333",
         evaluation=_evaluation(
