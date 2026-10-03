@@ -181,7 +181,7 @@ class ResearchArtifactStore:
             or not value.strip()
             or value.startswith(".")
             or "/" in value
-            or "\" in value
+            or "\\" in value
             or ".." in Path(value).parts
         ):
             raise_research_error(
