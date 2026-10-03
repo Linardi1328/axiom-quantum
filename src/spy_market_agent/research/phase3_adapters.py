@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from spy_market_agent.research.errors import ResearchRegistryError, raise_research_error
 from spy_market_agent.research.evaluation import CandidateEvaluation
@@ -81,6 +82,10 @@ def phase3_candidate_to_axiom_result(
     """Translate one Phase-3 candidate evaluation into an immutable canonical result."""
 
     summary = evaluation.summary
+    lifecycle_state: Literal[
+        ExperimentLifecycleState.COMPLETED,
+        ExperimentLifecycleState.REJECTED,
+    ]
     completed_folds = sum(fold.status == "completed" for fold in evaluation.fold_evaluations)
     total_folds = len(evaluation.fold_evaluations)
 
