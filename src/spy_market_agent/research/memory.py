@@ -106,9 +106,10 @@ class ResearchMemoryRegistry:
         for path in root.iterdir():
             if path.is_symlink() or not path.is_dir():
                 continue
-            if path.name.startswith("aq-exp-") and (
-                path / AXIOM_EXPERIMENT_MANIFEST_NAME
-            ).is_file():
+            if (
+                path.name.startswith("aq-exp-")
+                and (path / AXIOM_EXPERIMENT_MANIFEST_NAME).is_file()
+            ):
                 experiment_ids.append(path.name)
         return tuple(sorted(experiment_ids))
 
