@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -258,6 +259,10 @@ def phase3_candidate_result(
     selected = validated_selection.selected_candidate_name == validated_summary.candidate_name
     promoted = evidence_valid and selected and validated_selection.promotion_allowed
 
+    lifecycle_state: Literal[
+        ExperimentLifecycleState.COMPLETED,
+        ExperimentLifecycleState.REJECTED,
+    ]
     if not evidence_valid:
         lifecycle_state = ExperimentLifecycleState.REJECTED
         outcome = ExperimentOutcome.REJECTED
