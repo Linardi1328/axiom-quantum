@@ -117,10 +117,12 @@ def test_result_contract_rejects_non_finite_metrics_and_invalid_candidate_state(
             }
         )
     with pytest.raises(ValidationError, match="validation_candidate requires"):
-        ExperimentResult(
-            **base,
-            outcome=ExperimentOutcome.INCONCLUSIVE,
-            strategy_state=StrategyResearchState.VALIDATION_CANDIDATE,
+        ExperimentResult.model_validate(
+            {
+                **base,
+                "outcome": ExperimentOutcome.INCONCLUSIVE,
+                "strategy_state": StrategyResearchState.VALIDATION_CANDIDATE,
+            }
         )
 
 
@@ -174,9 +176,9 @@ def test_registry_rejects_result_for_unknown_experiment(tmp_path: Path) -> None:
         completed_at=datetime(2026, 10, 4, 1, 0, tzinfo=UTC),
     )
 
-    with pytest.raises(ResearchArtifactError) as exc_info:
+    with pytest.raises(ResearchArtifactError) as artifact_exc_info:
         registry.record_result(result)
-    assert "research_artifact_missing" in exc_info.value.codes
+    assert "research_artifact_missing" in artifact_exc_info.value.codes
 
 
 def test_registry_fails_closed_on_corrupt_and_mismatched_manifests(tmp_path: Path) -> None:
@@ -186,14 +188,14 @@ def test_registry_fails_closed_on_corrupt_and_mismatched_manifests(tmp_path: Pat
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text("{broken", encoding="utf-8")
 
-    with pytest.raises(ResearchArtifactError) as exc_info:
+    with pytest.raises(ResearchArtifactError) as artifact_exc_info:
         registry.load_experiment(experiment_id)
-    assert "research_artifact_json_load_failed" in exc_info.value.codes
+    assert "research_artifact_json_load_failed" in artifact_exc_info.value.codes
 
     manifest_path.write_text(
         '{"experiment_id":"aq-exp-000000000000000000000000","definition":{}}',
         encoding="utf-8",
     )
-    with pytest.raises(ResearchRegistryError) as exc_info:
+    with pytest.raises(ResearchRegistryError) as registry_exc_info:
         registry.load_experiment(experiment_id)
-    assert "invalid_axiom_experiment_record" in exc_info.value.codes
+    assert "invalid_axiom_experiment_record" in registry_exc_info.value.codes
