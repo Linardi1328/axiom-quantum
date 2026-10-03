@@ -65,6 +65,11 @@ from spy_market_agent.research.metrics import (
     aggregate_metric,
     calculate_research_classification_metrics,
 )
+from spy_market_agent.research.phase3_adapters import (
+    PHASE3_MIGRATION_TAG,
+    phase3_candidate_to_axiom_result,
+    phase3_manifest_to_axiom_experiment,
+)
 from spy_market_agent.research.protected import (
     assert_protected_evaluation_not_accessed,
     deny_protected_label_access,
@@ -158,6 +163,7 @@ __all__ = [
     "MINIMUM_INITIAL_TRAINING_ROWS",
     "NO_CANDIDATE_PROMOTION",
     "PHASE3_ARTIFACT_SCHEMA_VERSION",
+    "PHASE3_MIGRATION_TAG",
     "PHASE3_PHASE_ID",
     "WALK_FORWARD_FOLD_POLICY_ID",
     "ExperimentDefinition",
@@ -213,6 +219,8 @@ __all__ = [
     "fit_naive_scenario_baseline",
     "fold_manifest_identity",
     "load_research_campaign_config",
+    "phase3_candidate_to_axiom_result",
+    "phase3_manifest_to_axiom_experiment",
     "planned_trials_from_grid",
     "rank_classification_candidates",
     "required_classification_baselines",
