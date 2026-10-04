@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.research.artifacts import ResearchArtifactStore
@@ -9,13 +13,49 @@ from spy_market_agent.research.errors import ResearchRegistryError, raise_resear
 from spy_market_agent.research.experiment_core import (
     ExperimentDefinition,
     ExperimentResult,
-    ResearchEvidenceRef,
     experiment_identity,
     result_identity,
 )
 
 RESEARCH_REPORT_SCHEMA_VERSION = "axiom-research-report-v1"
 RESEARCH_REPORT_PREFIX = "axiom_report_"
+_REPORT_RESULT_ID = re.compile(r"^aq-result-[0-9a-f]{24}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class ResearchReportArtifact(BaseModel):
+    """Reference to a rendered report without mutating the source result identity."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["axiom-research-report-v1"] = RESEARCH_REPORT_SCHEMA_VERSION
+    result_id: str
+    relative_path: str
+    checksum: str
+
+    @field_validator("result_id")
+    @classmethod
+    def _result_id(cls, value: str) -> str:
+        if not _REPORT_RESULT_ID.fullmatch(value):
+            raise ValueError("result_id must be a canonical Axiom result identity.")
+        return value
+
+    @field_validator("relative_path")
+    @classmethod
+    def _relative_path(cls, value: str) -> str:
+        if not value.strip() or "\\" in value:
+            raise ValueError("relative_path must be a nonempty POSIX-style relative path.")
+        path = PurePosixPath(value)
+        if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+            raise ValueError("relative_path must stay relative without traversal components.")
+        return path.as_posix()
+
+    @field_validator("checksum")
+    @classmethod
+    def _checksum(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("checksum must be a lowercase SHA-256 digest.")
+        return value
 
 
 def research_report_name(result: ExperimentResult) -> str:
@@ -160,13 +200,14 @@ def write_research_report(
     definition: ExperimentDefinition,
     result: ExperimentResult,
     store: ResearchArtifactStore | None = None,
-) -> ResearchEvidenceRef:
-    """Persist a deterministic append-only report and return its evidence reference."""
+) -> ResearchReportArtifact:
+    """Persist a deterministic append-only report without changing the source result."""
 
     artifact_store = store or ResearchArtifactStore()
     content = render_research_report(definition, result).encode("utf-8")
     checksum = sha256_bytes(content)
     experiment_id = experiment_identity(definition)
+    result_id = result_identity(result)
     name = research_report_name(result)
     artifact_store.write_bytes(
         experiment_id,
@@ -176,8 +217,8 @@ def write_research_report(
         allow_replace=False,
     )
     path = artifact_store.artifact_path(experiment_id, name)
-    return ResearchEvidenceRef(
-        name=f"research-report-{result_identity(result)}",
+    return ResearchReportArtifact(
+        result_id=result_id,
         relative_path=artifact_store.relative_path(path),
         checksum=checksum,
     )
