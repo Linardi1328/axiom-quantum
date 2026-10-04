@@ -90,6 +90,7 @@ from spy_market_agent.research.registries import (
 from spy_market_agent.research.reporting import (
     RESEARCH_REPORT_PREFIX,
     RESEARCH_REPORT_SCHEMA_VERSION,
+    ResearchReportArtifact,
     render_research_report,
     report_artifact_path,
     research_report_name,
@@ -194,6 +195,7 @@ __all__ = [
     "ResearchDatasetRef",
     "ResearchEvidenceRef",
     "ResearchMemoryRegistry",
+    "ResearchReportArtifact",
     "ResearchRuntimeLineage",
     "ScenarioBaseline",
     "ScenarioBaselineBenchmark",
