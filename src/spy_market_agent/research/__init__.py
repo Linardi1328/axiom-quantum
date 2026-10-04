@@ -1,4 +1,10 @@
 from spy_market_agent.research.artifacts import ResearchArtifactStore
+from spy_market_agent.research.backtest_evidence import (
+    BACKTEST_EVIDENCE_SCHEMA_VERSION,
+    CanonicalBacktestEvidence,
+    backtest_metrics_to_axiom_result,
+    canonical_backtest_evidence,
+)
 from spy_market_agent.research.baselines import classification_baseline_probabilities
 from spy_market_agent.research.calibration import build_calibration_split
 from spy_market_agent.research.campaign import (
@@ -136,6 +142,7 @@ __all__ = [
     "AXIOM_EXPERIMENT_SCHEMA_VERSION",
     "AXIOM_RESULT_ID_VERSION",
     "AXIOM_RESULT_SCHEMA_VERSION",
+    "BACKTEST_EVIDENCE_SCHEMA_VERSION",
     "BOUNDARY_EXCLUSION_SESSIONS",
     "DEFAULT_ASSESSMENT_WINDOW_ROWS",
     "DEFAULT_STEP_ROWS",
@@ -166,6 +173,7 @@ __all__ = [
     "PHASE3_MIGRATION_TAG",
     "PHASE3_PHASE_ID",
     "WALK_FORWARD_FOLD_POLICY_ID",
+    "CanonicalBacktestEvidence",
     "ExperimentDefinition",
     "ExperimentLifecycleState",
     "ExperimentOutcome",
@@ -198,6 +206,7 @@ __all__ = [
     "assert_protected_evaluation_not_accessed",
     "axiom_experiment_identity",
     "axiom_result_identity",
+    "backtest_metrics_to_axiom_result",
     "baseline_feature_registry",
     "baseline_model_registry",
     "build_calibration_split",
@@ -206,6 +215,7 @@ __all__ = [
     "calculate_research_classification_metrics",
     "calculate_scenario_probability_metrics",
     "campaign_config_identity",
+    "canonical_backtest_evidence",
     "classification_baseline_probabilities",
     "classify_scenario_return",
     "construct_walk_forward_manifest",
