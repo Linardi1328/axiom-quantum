@@ -20,7 +20,7 @@ def _metrics(*, total_execution_notional: float = 10_000.0) -> BacktestMetrics:
         final_market_value=0.0,
         final_equity=10_500.0,
         total_return=0.05,
-        maximum_drawdown=-0.10,
+        maximum_drawdown=0.10,
         total_reference_notional=10_000.0,
         total_execution_notional=total_execution_notional,
         total_commission=10.0,
@@ -42,7 +42,7 @@ def test_canonical_backtest_evidence_preserves_validated_metrics() -> None:
 
     assert evidence.schema_version == BACKTEST_EVIDENCE_SCHEMA_VERSION
     assert evidence.metrics["total_return"] == 0.05
-    assert evidence.metrics["maximum_drawdown"] == -0.10
+    assert evidence.metrics["maximum_drawdown"] == 0.10
     assert evidence.metrics["total_transaction_cost"] == 20.0
     assert evidence.metrics["turnover_ratio"] == 1.0
     assert evidence.metrics["exposure_fraction"] == 0.40
