@@ -32,6 +32,11 @@ where `<result-id>` is the canonical `aq-result-*` identity produced from the im
 `ExperimentResult`. Equivalent canonical inputs therefore map to the same report path and content.
 A changed result maps to a different result identity and a different report filename.
 
+The writer returns a dedicated `ResearchReportArtifact`, not a `ResearchEvidenceRef`. A report is
+derived from the immutable result, so linking that report back into the same result's evidence set
+would create a recursive identity cycle. The report artifact can be indexed or referenced by later
+systems without mutating its source result.
+
 ## Determinism
 
 The renderer:
@@ -52,7 +57,7 @@ Reports are written through `ResearchArtifactStore.write_bytes` with replacement
 - writing identical report bytes to the same result-derived path is idempotent;
 - conflicting existing bytes at that path fail closed;
 - reports remain beneath the ignored `artifacts/research/` root;
-- the writer returns a checksum-bearing `ResearchEvidenceRef` for downstream linkage.
+- the writer returns a checksum-bearing `ResearchReportArtifact` for downstream indexing.
 
 ## Authority Boundary
 
@@ -83,6 +88,7 @@ This slice does not add:
 
 - equivalent canonical input pairs render byte-identical Markdown;
 - report filenames are derived from canonical result identity;
+- report artifact references do not create result-identity recursion;
 - mismatched experiment/result pairs fail closed;
 - operator notes are not rendered;
 - metrics and evidence references have deterministic ordering;
