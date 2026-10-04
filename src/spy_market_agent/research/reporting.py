@@ -28,7 +28,7 @@ class ResearchReportArtifact(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-research-report-v1"] = RESEARCH_REPORT_SCHEMA_VERSION
+    schema_version: Literal["axiom-research-report-v1"] = "axiom-research-report-v1"
     result_id: str
     relative_path: str
     checksum: str
