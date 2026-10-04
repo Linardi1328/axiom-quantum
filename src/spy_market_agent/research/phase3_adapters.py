@@ -126,6 +126,11 @@ def phase3_candidate_to_axiom_result(
     completed_folds = sum(fold.status == "completed" for fold in evaluation.fold_evaluations)
     total_folds = len(evaluation.fold_evaluations)
     fold_evidence_complete = total_folds > 0 and completed_folds == total_folds
+    selected_for_promotion = (
+        selection.promotion_allowed
+        and selection.selected_candidate_name == evaluation.candidate_name
+    )
+    promotion_evidence_consistent = evaluation.candidate_name in selection.ranked_candidates
 
     if summary is None or not fold_evidence_complete:
         lifecycle_state = ExperimentLifecycleState.COMPLETED
@@ -140,10 +145,7 @@ def phase3_candidate_to_axiom_result(
     else:
         lifecycle_state = ExperimentLifecycleState.COMPLETED
         outcome = ExperimentOutcome.COMPLETED
-        promoted = (
-            selection.promotion_allowed
-            and selection.selected_candidate_name == evaluation.candidate_name
-        )
+        promoted = selected_for_promotion and promotion_evidence_consistent
         strategy_state = (
             StrategyResearchState.VALIDATION_CANDIDATE
             if promoted
@@ -155,21 +157,18 @@ def phase3_candidate_to_axiom_result(
             else "Candidate evaluation completed but remains research-only."
         )
 
-    if (
-        selection.promotion_allowed
-        and selection.selected_candidate_name == evaluation.candidate_name
-        and (
-            summary is None
-            or summary.leaky
-            or not summary.lineage_complete
-            or not summary.valid
-            or not fold_evidence_complete
-        )
+    if selected_for_promotion and (
+        summary is None
+        or summary.leaky
+        or not summary.lineage_complete
+        or not summary.valid
+        or not fold_evidence_complete
+        or not promotion_evidence_consistent
     ):
         raise_research_error(
             ResearchRegistryError,
             "invalid_phase3_promotion_mapping",
-            "a Phase-3 promoted candidate must have complete, valid, non-leaky lineage.",
+            "a Phase-3 promoted candidate must have complete, valid, ranked, non-leaky lineage.",
         )
 
     metric_snapshot: dict[str, str | int | float | bool | None] = {
