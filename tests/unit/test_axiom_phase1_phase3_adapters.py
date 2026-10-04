@@ -196,7 +196,8 @@ def test_phase3_manifest_adapter_losslessly_migrates_legacy_git_reference() -> N
     assert "legacy_git_commit_ref_b64:dW5hdmFpbGFibGU" in result.notes
 
 
-def test_phase3_promoted_candidate_maps_to_validation_candidate_and_omits_undefined_metrics() -> None:
+def test_phase3_promoted_candidate_maps_to_validation_candidate_and_omits_undefined_metrics(
+) -> None:
     result = phase3_candidate_to_axiom_result(
         experiment_id="aq-exp-111111111111111111111111",
         evaluation=_evaluation(summary=_summary()),
