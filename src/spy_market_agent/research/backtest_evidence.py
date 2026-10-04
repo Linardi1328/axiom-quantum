@@ -86,6 +86,7 @@ def backtest_metrics_to_axiom_result(
     """Record backtest performance evidence without granting promotion or execution authority."""
 
     evidence = canonical_backtest_evidence(metrics)
+    metric_snapshot: dict[str, str | int | float | bool | None] = dict(evidence.metrics)
     return ExperimentResult(
         experiment_id=experiment_id,
         lifecycle_state=ExperimentLifecycleState.COMPLETED,
@@ -99,6 +100,6 @@ def backtest_metrics_to_axiom_result(
             "Backtest performance evidence recorded for research comparison only; "
             "no validation promotion or execution authority is granted."
         ),
-        metric_snapshot=evidence.metrics,
+        metric_snapshot=metric_snapshot,
         completed_at=completed_at,
     )
