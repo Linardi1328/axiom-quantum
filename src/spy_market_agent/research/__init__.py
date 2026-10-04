@@ -87,6 +87,14 @@ from spy_market_agent.research.registries import (
     build_experiment_manifest,
     required_classification_baselines,
 )
+from spy_market_agent.research.reporting import (
+    RESEARCH_REPORT_PREFIX,
+    RESEARCH_REPORT_SCHEMA_VERSION,
+    render_research_report,
+    report_artifact_path,
+    research_report_name,
+    write_research_report,
+)
 from spy_market_agent.research.runner import run_development_campaign
 from spy_market_agent.research.scenario_candidate import (
     MI1D_CANDIDATE_ID,
@@ -172,6 +180,8 @@ __all__ = [
     "PHASE3_ARTIFACT_SCHEMA_VERSION",
     "PHASE3_MIGRATION_TAG",
     "PHASE3_PHASE_ID",
+    "RESEARCH_REPORT_PREFIX",
+    "RESEARCH_REPORT_SCHEMA_VERSION",
     "WALK_FORWARD_FOLD_POLICY_ID",
     "CanonicalBacktestEvidence",
     "ExperimentDefinition",
@@ -233,7 +243,10 @@ __all__ = [
     "phase3_manifest_to_axiom_experiment",
     "planned_trials_from_grid",
     "rank_classification_candidates",
+    "render_research_report",
+    "report_artifact_path",
     "required_classification_baselines",
+    "research_report_name",
     "run_development_campaign",
     "strategy_threshold_policy",
     "validate_inner_training_search",
@@ -241,4 +254,5 @@ __all__ = [
     "validate_phase2_final_test_isolation",
     "validate_supervised_leakage_contract",
     "validate_training_only_fit_scope",
+    "write_research_report",
 ]
