@@ -18,6 +18,7 @@ from spy_market_agent.research.experiment_core import (
     ResearchRuntimeLineage,
     StrategyResearchState,
     experiment_identity,
+    result_identity,
 )
 from spy_market_agent.research.reporting import (
     RESEARCH_REPORT_SCHEMA_VERSION,
@@ -99,9 +100,7 @@ def test_research_report_is_deterministic_and_auditable() -> None:
     assert first.endswith("\n")
     assert RESEARCH_REPORT_SCHEMA_VERSION in first
     assert experiment_identity(definition) in first
-    assert research_report_name(result) == (
-        "axiom_report_aq-result-" + research_report_name(result).split("aq-result-")[1]
-    )
+    assert research_report_name(result) == f"axiom_report_{result_identity(result)}.md"
     assert "`maximum_drawdown`: `0.1`" in first
     assert "`qualified`: `true`" in first
     assert "Execution authority: `none`" in first
