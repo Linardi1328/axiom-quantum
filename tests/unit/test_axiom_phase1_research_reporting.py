@@ -22,6 +22,7 @@ from spy_market_agent.research.experiment_core import (
 )
 from spy_market_agent.research.reporting import (
     RESEARCH_REPORT_SCHEMA_VERSION,
+    ResearchReportArtifact,
     render_research_report,
     research_report_name,
     write_research_report,
@@ -128,7 +129,9 @@ def test_write_research_report_is_idempotent_and_content_addressed(tmp_path: Pat
     second = write_research_report(definition=definition, result=result, store=store)
 
     assert first == second
-    assert first.name.startswith("research-report-aq-result-")
+    assert isinstance(first, ResearchReportArtifact)
+    assert not isinstance(first, ResearchEvidenceRef)
+    assert first.result_id == result_identity(result)
     path = tmp_path / first.relative_path
     assert path.name == research_report_name(result)
     assert first.checksum == sha256_bytes(path.read_bytes())
