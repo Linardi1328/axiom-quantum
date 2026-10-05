@@ -213,6 +213,7 @@ def test_canonical_migration_is_idempotent_and_conflicts_fail_closed(tmp_path: P
     first = migrate_canonical_pair_to_research_memory(
         definition=definition,
         result=result,
+        source_system="legacy",
         source_experiment_id="legacy-exp-1",
         source_record_id="candidate-a",
         registry=registry,
@@ -220,12 +221,14 @@ def test_canonical_migration_is_idempotent_and_conflicts_fail_closed(tmp_path: P
     second = migrate_canonical_pair_to_research_memory(
         definition=definition,
         result=result,
+        source_system="legacy",
         source_experiment_id="legacy-exp-1",
         source_record_id="candidate-a",
         registry=registry,
     )
 
     assert first == second
+    assert first.source_system == "legacy"
     assert first.schema_version == RESEARCH_MIGRATION_RECEIPT_SCHEMA_VERSION
     assert first.migration_id == research_migration_identity(first)
     assert registry.list_result_ids(first.experiment_id) == (first.result_id,)
@@ -236,10 +239,45 @@ def test_canonical_migration_is_idempotent_and_conflicts_fail_closed(tmp_path: P
         migrate_canonical_pair_to_research_memory(
             definition=conflicting,
             result=_result(conflicting),
+            source_system="legacy",
             source_experiment_id="legacy-exp-1",
             source_record_id="candidate-a",
             registry=registry,
         )
+
+
+@pytest.mark.parametrize(
+    ("source_system", "source_experiment_id", "source_record_id", "error_code"),
+    [
+        ("", "legacy-exp-1", "candidate-a", "research_migration_source_system_missing"),
+        ("legacy", "", "candidate-a", "research_migration_source_identifier_missing"),
+        ("legacy", "legacy-exp-1", "", "research_migration_source_identifier_missing"),
+    ],
+)
+def test_migration_rejects_incomplete_provenance_before_writing(
+    tmp_path: Path,
+    source_system: str,
+    source_experiment_id: str,
+    source_record_id: str,
+    error_code: str,
+) -> None:
+    """Invalid provenance fails before experiment or result records are persisted."""
+
+    registry = _registry(tmp_path)
+    definition = _definition()
+    result = _result(definition)
+
+    with pytest.raises(ResearchRegistryError, match=error_code):
+        migrate_canonical_pair_to_research_memory(
+            definition=definition,
+            result=result,
+            source_system=source_system,
+            source_experiment_id=source_experiment_id,
+            source_record_id=source_record_id,
+            registry=registry,
+        )
+
+    assert registry.list_experiment_ids() == ()
 
 
 def test_migration_rejects_result_bound_to_different_experiment(tmp_path: Path) -> None:
@@ -256,6 +294,7 @@ def test_migration_rejects_result_bound_to_different_experiment(tmp_path: Path) 
         migrate_canonical_pair_to_research_memory(
             definition=definition,
             result=wrong_result,
+            source_system="legacy",
             source_experiment_id="legacy-exp-1",
             source_record_id="candidate-a",
             registry=_registry(tmp_path),
@@ -293,6 +332,7 @@ def test_phase3_migration_preserves_provenance_state_and_reportability(tmp_path:
 
     stored_experiment = registry.load_experiment(first.experiment_id)
     stored_result = registry.load_result(first.experiment_id, first.result_id)
+    assert first.source_system == "phase3"
     assert f"source:{manifest.experiment_id}" in stored_experiment.definition.tags
     assert first.source_experiment_id == manifest.experiment_id
     assert first.source_record_id == "candidate-a"
