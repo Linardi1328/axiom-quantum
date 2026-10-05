@@ -17,6 +17,22 @@ from spy_market_agent.research.experiment_core import (
 
 ROBUSTNESS_EVIDENCE_SCHEMA_VERSION = "axiom-robustness-evidence-v1"
 _SCENARIO_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_REQUIRED_RETURN_PATH_METRICS = frozenset(
+    {
+        "annualized_downside_deviation",
+        "annualized_return",
+        "annualized_volatility",
+        "best_period_return",
+        "cumulative_return",
+        "maximum_drawdown",
+        "mean_period_return",
+        "non_positive_period_fraction",
+        "period_count",
+        "positive_period_fraction",
+        "terminal_wealth",
+        "worst_period_return",
+    }
+)
 
 
 class ReturnPathRobustness(BaseModel):
@@ -36,13 +52,25 @@ class ReturnPathRobustness(BaseModel):
 
         if self.annualization_periods <= 0:
             raise ValueError("annualization_periods must be positive")
-        if not self.metrics or self.metrics.get("period_count", 0) <= 0:
-            raise ValueError("robustness evidence must contain at least one period")
+        if not _REQUIRED_RETURN_PATH_METRICS.issubset(self.metrics):
+            raise ValueError("robustness evidence is missing required return-path metrics")
+        if tuple(self.metrics) != tuple(sorted(self.metrics)):
+            raise ValueError("robustness metrics must be sorted by metric name")
+        period_count = self.metrics["period_count"]
+        if isinstance(period_count, bool) or not isinstance(period_count, int) or period_count <= 0:
+            raise ValueError("period_count must be a positive integer")
         for name, value in self.metrics.items():
             if not name or isinstance(value, bool):
                 raise ValueError("robustness metric names and values must be valid")
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError(f"robustness metric {name!r} must be finite")
+        for name in ("positive_period_fraction", "non_positive_period_fraction"):
+            fraction = float(self.metrics[name])
+            if fraction < 0.0 or fraction > 1.0:
+                raise ValueError(f"{name} must be within [0, 1]")
+        drawdown = float(self.metrics["maximum_drawdown"])
+        if drawdown < 0.0 or drawdown > 1.0:
+            raise ValueError("maximum_drawdown must be within [0, 1]")
         return self
 
 
@@ -85,6 +113,11 @@ class CanonicalRobustnessEvidence(BaseModel):
             scenario_ids
         ):
             raise ValueError("robustness scenarios must be unique and sorted by scenario_id")
+        annualization_periods = {item.evidence.annualization_periods for item in self.scenarios}
+        if len(annualization_periods) != 1:
+            raise ValueError("robustness scenarios must share one annualization convention")
+        if tuple(self.aggregate_metrics) != tuple(sorted(self.aggregate_metrics)):
+            raise ValueError("aggregate robustness metrics must be sorted by metric name")
         for name, value in self.aggregate_metrics.items():
             if not name or isinstance(value, bool):
                 raise ValueError("aggregate robustness metric names and values must be valid")
@@ -178,6 +211,9 @@ def scenario_robustness_evidence(
     scenario_ids = tuple(item.scenario_id for item in ordered)
     if len(set(scenario_ids)) != len(scenario_ids):
         raise ValueError("scenario_id values must be unique")
+    annualization_periods = {item.evidence.annualization_periods for item in ordered}
+    if len(annualization_periods) != 1:
+        raise ValueError("scenarios must share one annualization convention")
 
     cumulative_returns = _scenario_values(ordered, "cumulative_return")
     annualized_returns = _scenario_values(ordered, "annualized_return")
