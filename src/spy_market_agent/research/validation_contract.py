@@ -95,6 +95,24 @@ class ValidationEvidenceRef(BaseModel):
         return value
 
 
+def _canonical_evidence(
+    value: tuple[ValidationEvidenceRef, ...],
+) -> tuple[ValidationEvidenceRef, ...]:
+    keys = tuple((item.stage, item.evidence_id) for item in value)
+    if len(keys) != len(set(keys)):
+        raise ValueError("validation evidence references must be unique per stage and evidence ID")
+    return tuple(
+        sorted(
+            value,
+            key=lambda item: (
+                _VALIDATION_STAGE_ORDER[item.stage],
+                item.evidence_id,
+                item.source_id,
+            ),
+        )
+    )
+
+
 class ValidationCase(BaseModel):
     """Canonical Phase 2 validation case over an existing research candidate."""
 
@@ -142,20 +160,7 @@ class ValidationCase(BaseModel):
     def _evidence(
         cls, value: tuple[ValidationEvidenceRef, ...]
     ) -> tuple[ValidationEvidenceRef, ...]:
-        keys = tuple((item.stage, item.evidence_id) for item in value)
-        if len(keys) != len(set(keys)):
-            raise ValueError("validation evidence references must be unique per stage and evidence ID")
-        ordered = tuple(
-            sorted(
-                value,
-                key=lambda item: (
-                    _VALIDATION_STAGE_ORDER[item.stage],
-                    item.evidence_id,
-                    item.source_id,
-                ),
-            )
-        )
-        return ordered
+        return _canonical_evidence(value)
 
     @model_validator(mode="after")
     def _identity_matches(self) -> ValidationCase:
@@ -201,13 +206,14 @@ def build_validation_case(
 
     if result.strategy_state != StrategyResearchState.VALIDATION_CANDIDATE:
         raise ValueError("Phase 2 validation requires a validation_candidate research result")
+    canonical_evidence = _canonical_evidence(evidence)
     payload: dict[str, object] = {
         "schema_version": VALIDATION_CASE_SCHEMA_VERSION,
         "experiment_id": result.experiment_id,
         "result_id": result_identity(result),
         "policy_id": policy_id,
         "source_strategy_state": "validation_candidate",
-        "evidence": tuple(evidence),
+        "evidence": tuple(item.model_dump(mode="python") for item in canonical_evidence),
         "execution_authority": "none",
         "identity_version": VALIDATION_CASE_ID_VERSION,
     }
@@ -217,5 +223,5 @@ def build_validation_case(
         experiment_id=result.experiment_id,
         result_id=result_identity(result),
         policy_id=policy_id,
-        evidence=evidence,
+        evidence=canonical_evidence,
     )
