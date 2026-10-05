@@ -98,6 +98,22 @@ def test_scenario_robustness_rejects_duplicate_ids() -> None:
         scenario_robustness_evidence((first, second))
 
 
+def test_scenario_robustness_rejects_mixed_annualization() -> None:
+    """Annualized scenario metrics must share one convention before comparison."""
+
+    daily = RobustnessScenario(
+        scenario_id="daily",
+        evidence=return_path_robustness((0.01, -0.01), annualization_periods=252),
+    )
+    monthly = RobustnessScenario(
+        scenario_id="monthly",
+        evidence=return_path_robustness((0.01, -0.01), annualization_periods=12),
+    )
+
+    with pytest.raises(ValueError, match="annualization convention"):
+        scenario_robustness_evidence((daily, monthly))
+
+
 def test_robustness_result_remains_research_only() -> None:
     """Canonical robustness evidence must never imply promotion or execution authority."""
 
