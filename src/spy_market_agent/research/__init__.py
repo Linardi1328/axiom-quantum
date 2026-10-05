@@ -71,6 +71,14 @@ from spy_market_agent.research.metrics import (
     aggregate_metric,
     calculate_research_classification_metrics,
 )
+from spy_market_agent.research.migration import (
+    RESEARCH_MIGRATION_RECEIPT_ID_VERSION,
+    RESEARCH_MIGRATION_RECEIPT_SCHEMA_VERSION,
+    ResearchMigrationReceipt,
+    migrate_canonical_pair_to_research_memory,
+    migrate_phase3_candidate_to_research_memory,
+    research_migration_identity,
+)
 from spy_market_agent.research.phase3_adapters import (
     PHASE3_MIGRATION_TAG,
     phase3_candidate_to_axiom_result,
@@ -191,6 +199,8 @@ __all__ = [
     "PHASE3_ARTIFACT_SCHEMA_VERSION",
     "PHASE3_MIGRATION_TAG",
     "PHASE3_PHASE_ID",
+    "RESEARCH_MIGRATION_RECEIPT_ID_VERSION",
+    "RESEARCH_MIGRATION_RECEIPT_SCHEMA_VERSION",
     "RESEARCH_REPORT_PREFIX",
     "RESEARCH_REPORT_SCHEMA_VERSION",
     "ROBUSTNESS_EVIDENCE_SCHEMA_VERSION",
@@ -209,6 +219,7 @@ __all__ = [
     "ResearchDatasetRef",
     "ResearchEvidenceRef",
     "ResearchMemoryRegistry",
+    "ResearchMigrationReceipt",
     "ResearchReportArtifact",
     "ResearchRuntimeLineage",
     "RobustnessScenario",
@@ -258,6 +269,8 @@ __all__ = [
     "fit_naive_scenario_baseline",
     "fold_manifest_identity",
     "load_research_campaign_config",
+    "migrate_canonical_pair_to_research_memory",
+    "migrate_phase3_candidate_to_research_memory",
     "phase3_candidate_to_axiom_result",
     "phase3_manifest_to_axiom_experiment",
     "planned_trials_from_grid",
@@ -265,6 +278,7 @@ __all__ = [
     "render_research_report",
     "report_artifact_path",
     "required_classification_baselines",
+    "research_migration_identity",
     "research_report_name",
     "robustness_evidence_to_axiom_result",
     "run_development_campaign",
