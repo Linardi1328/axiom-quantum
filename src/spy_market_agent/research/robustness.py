@@ -40,9 +40,7 @@ class ReturnPathRobustness(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-robustness-evidence-v1"] = (
-        "axiom-robustness-evidence-v1"
-    )
+    schema_version: Literal["axiom-robustness-evidence-v1"] = "axiom-robustness-evidence-v1"
     annualization_periods: int
     metrics: dict[str, int | float]
 
@@ -96,9 +94,7 @@ class CanonicalRobustnessEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-robustness-evidence-v1"] = (
-        "axiom-robustness-evidence-v1"
-    )
+    schema_version: Literal["axiom-robustness-evidence-v1"] = "axiom-robustness-evidence-v1"
     scenarios: tuple[RobustnessScenario, ...]
     aggregate_metrics: dict[str, int | float]
 
@@ -161,9 +157,7 @@ def return_path_robustness(
     annualized_volatility = period_volatility * math.sqrt(annualization_periods)
     downside_square_mean = statistics.fmean(min(value, 0.0) ** 2 for value in parsed)
     downside_period_deviation = math.sqrt(downside_square_mean)
-    annualized_downside_deviation = downside_period_deviation * math.sqrt(
-        annualization_periods
-    )
+    annualized_downside_deviation = downside_period_deviation * math.sqrt(annualization_periods)
     annualized_return = _annualized_return(
         wealth=wealth,
         period_count=period_count,
@@ -185,9 +179,7 @@ def return_path_robustness(
         "worst_period_return": min(parsed),
     }
     if period_volatility > 0.0:
-        metrics["sharpe_ratio"] = (
-            mean_return / period_volatility * math.sqrt(annualization_periods)
-        )
+        metrics["sharpe_ratio"] = mean_return / period_volatility * math.sqrt(annualization_periods)
     if downside_period_deviation > 0.0:
         metrics["sortino_ratio"] = (
             mean_return / downside_period_deviation * math.sqrt(annualization_periods)
@@ -251,8 +243,7 @@ def robustness_evidence_to_axiom_result(
     """Record canonical robustness evidence without granting promotion authority."""
 
     snapshot: dict[str, str | int | float | bool | None] = {
-        f"robustness.{name}": value
-        for name, value in evidence.aggregate_metrics.items()
+        f"robustness.{name}": value for name, value in evidence.aggregate_metrics.items()
     }
     for scenario in evidence.scenarios:
         for name, value in scenario.evidence.metrics.items():
