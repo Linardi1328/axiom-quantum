@@ -147,7 +147,7 @@ def test_resampling_result_adapter_is_research_only() -> None:
     """Resampling diagnostics can never elevate a strategy into execution authority."""
 
     evidence = canonical_resampling_evidence(SOURCE_RETURNS, config=_config())
-    result = resampling_evidence_to_axi_result(
+    result = resampling_evidence_to_axiom_result(
         experiment_id="aq-exp-111111111111111111111111",
         evidence=evidence,
         completed_at=COMPLETED_AT,
