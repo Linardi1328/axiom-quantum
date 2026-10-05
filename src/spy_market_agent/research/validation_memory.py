@@ -308,17 +308,11 @@ class ValidationMemoryRegistry:
             )
         decision_record = self.load_decision(experiment_id, entry.decision_id)
         decision = decision_record.decision
-        if (
-            decision.verdict != ValidationVerdict.REJECTED
-            or decision.validation_id != entry.validation_id
-            or decision.result_id != entry.result_id
-            or decision.policy_id != entry.policy_id
-            or decision.policy_digest != entry.policy_digest
-        ):
+        if build_strategy_graveyard_entry(decision) != entry:
             raise_research_error(
                 ResearchRegistryError,
                 "strategy_graveyard_link_mismatch",
-                "graveyard references must match the stored rejected validation decision.",
+                "graveyard content must exactly match the stored rejected validation decision.",
             )
         return entry
 
