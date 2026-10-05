@@ -185,7 +185,9 @@ class ValidationCase(BaseModel):
         """Return required validation stages that do not yet have any evidence reference."""
 
         evidenced = set(self.evidenced_stages)
-        return tuple(stage for stage in VALIDATION_REQUIRED_EVIDENCE_STAGES if stage not in evidenced)
+        return tuple(
+            stage for stage in VALIDATION_REQUIRED_EVIDENCE_STAGES if stage not in evidenced
+        )
 
 
 def validation_case_identity(case: ValidationCase) -> str:
