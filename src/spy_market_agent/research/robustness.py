@@ -178,13 +178,20 @@ def canonical_robustness_evidence(
     scenario_by_id = {scenario.scenario_id: scenario for scenario in scenarios}
     if len(scenario_by_id) != len(scenarios):
         raise ValueError("robustness scenario IDs must be unique")
+    baseline_scenarios = [
+        scenario for scenario in scenarios if scenario.kind == RobustnessScenarioKind.BASELINE
+    ]
+    if len(baseline_scenarios) != 1:
+        raise ValueError("robustness evidence requires exactly one baseline scenario")
     if baseline_scenario_id not in scenario_by_id:
         raise ValueError("baseline_scenario_id must identify one supplied scenario")
     baseline = scenario_by_id[baseline_scenario_id]
     if baseline.kind != RobustnessScenarioKind.BASELINE:
-        raise ValueError("baseline scenario must use kind=baseline")
+        raise ValueError("baseline_scenario_id must identify the baseline scenario")
     if not metric_directions:
         raise ValueError("metric_directions must not be empty")
+    if any(not isinstance(direction, MetricDirection) for direction in metric_directions.values()):
+        raise ValueError("metric_directions values must be MetricDirection members")
 
     declared_metrics = set(metric_directions)
     observed_metrics = {name for scenario in scenarios for name in scenario.metrics}
@@ -205,7 +212,11 @@ def canonical_robustness_evidence(
             if metric_name in scenario.metrics
         ]
         baseline_value = float(baseline.metrics[metric_name])
-        worst_value = min(values) if direction == MetricDirection.HIGHER_IS_BETTER else max(values)
+        worst_value = (
+            min(values)
+            if direction == MetricDirection.HIGHER_IS_BETTER
+            else max(values)
+        )
         absolute_degradation = (
             baseline_value - worst_value
             if direction == MetricDirection.HIGHER_IS_BETTER
