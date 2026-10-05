@@ -254,7 +254,7 @@ def resampling_evidence_to_axiom_result(
     evidence: CanonicalResamplingEvidence,
     completed_at: datetime,
 ) -> ExperimentResult:
-    """Record resampling diagnostics as research-only evidence with no promotion authority."""
+    """Record resampling diagnostics with complete deterministic provenance and no authority."""
 
     return ExperimentResult(
         experiment_id=experiment_id,
@@ -267,6 +267,14 @@ def resampling_evidence_to_axiom_result(
             "guaranteed future probabilities."
         ),
         metric_snapshot={
+            "resampling_schema_version": evidence.schema_version,
+            "resampling_source_return_count": evidence.source_return_count,
+            "resampling_source_return_checksum": evidence.source_return_checksum,
+            "resampling_method": evidence.config.method.value,
+            "resampling_sample_count": evidence.config.sample_count,
+            "resampling_seed": evidence.config.seed,
+            "resampling_block_size": evidence.config.block_size,
+            "resampling_drawdown_breach_threshold": evidence.config.drawdown_breach_threshold,
             "resampling_loss_frequency": evidence.loss_frequency,
             "resampling_drawdown_breach_frequency": evidence.drawdown_breach_frequency,
             "resampling_cumulative_return_p05": evidence.cumulative_return_distribution.p05,
