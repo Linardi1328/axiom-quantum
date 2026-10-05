@@ -8,13 +8,19 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from spy_market_agent.benchmark.artifacts import sha256_bytes
+from spy_market_agent.benchmark.artifacts import sha256_bytes, sha256_json
 from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError, raise_research_error
 from spy_market_agent.research.experiment_core import ExperimentResult, result_identity
-from spy_market_agent.research.resampling import CanonicalResamplingEvidence
+from spy_market_agent.research.resampling import (
+    CanonicalResamplingEvidence,
+    ResamplingDistributionSummary,
+)
 from spy_market_agent.research.robustness import CanonicalRobustnessEvidence
-from spy_market_agent.research.validation_contract import ValidationCase
+from spy_market_agent.research.validation_contract import (
+    ValidationCase,
+    ValidationEvidenceSourceKind,
+)
 from spy_market_agent.research.validation_engine import (
     ValidationDecision,
     ValidationPolicy,
@@ -33,7 +39,6 @@ VALIDATION_REPORT_SCHEMA_VERSION = "axiom-validation-report-v1"
 VALIDATION_REPORT_PREFIX = "axiom_validation_report_"
 _DECISION_ID = re.compile(r"^aq-decision-[0-9a-f]{24}$")
 _VALIDATION_ID = re.compile(r"^aq-validation-[0-9a-f]{24}$")
-_GRAVEYARD_ID = re.compile(r"^aq-graveyard-[0-9a-f]{24}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|~])")
 _BACKTICK_RUN = re.compile(r"`+")
@@ -53,6 +58,8 @@ class ValidationReportArtifact(BaseModel):
     @field_validator("decision_id")
     @classmethod
     def _decision_id(cls, value: str) -> str:
+        """Require the canonical content-addressed validation decision identity shape."""
+
         if not _DECISION_ID.fullmatch(value):
             raise ValueError("decision_id must be a canonical Axiom validation decision identity")
         return value
@@ -60,6 +67,8 @@ class ValidationReportArtifact(BaseModel):
     @field_validator("validation_id")
     @classmethod
     def _validation_id(cls, value: str) -> str:
+        """Require the canonical Phase 2 validation-case identity shape."""
+
         if not _VALIDATION_ID.fullmatch(value):
             raise ValueError("validation_id must be a canonical Axiom validation identity")
         return value
@@ -67,6 +76,8 @@ class ValidationReportArtifact(BaseModel):
     @field_validator("relative_path")
     @classmethod
     def _relative_path(cls, value: str) -> str:
+        """Require a traversal-free POSIX path beneath the research artifact root."""
+
         if not value.strip() or "\\" in value:
             raise ValueError("relative_path must be a nonempty POSIX-style relative path")
         path = PurePosixPath(value)
@@ -77,6 +88,8 @@ class ValidationReportArtifact(BaseModel):
     @field_validator("checksum")
     @classmethod
     def _checksum(cls, value: str) -> str:
+        """Require the rendered report checksum to be canonical lowercase SHA-256."""
+
         if not _SHA256.fullmatch(value):
             raise ValueError("checksum must be a lowercase SHA-256 digest")
         return value
@@ -89,12 +102,14 @@ class ValidationWorkflowResult(BaseModel):
 
     decision: ValidationDecision
     decision_id: str
-    graveyard_id: str | None = None
+    graveyard: StrategyGraveyardEntry | None = None
     report: ValidationReportArtifact
     execution_authority: Literal["none"] = "none"
 
     @model_validator(mode="after")
     def _consistent_links(self) -> ValidationWorkflowResult:
+        """Require exact decision, report, and rejected-only graveyard cross-links."""
+
         if self.decision_id != validation_decision_identity(self.decision):
             raise ValueError("workflow decision_id must match the canonical decision")
         if self.report.decision_id != self.decision_id:
@@ -102,17 +117,47 @@ class ValidationWorkflowResult(BaseModel):
         if self.report.validation_id != self.decision.validation_id:
             raise ValueError("workflow report must reference the canonical validation case")
         if self.decision.verdict == ValidationVerdict.REJECTED:
-            if self.graveyard_id is None or not _GRAVEYARD_ID.fullmatch(self.graveyard_id):
-                raise ValueError("rejected validation workflow requires a canonical graveyard ID")
-        elif self.graveyard_id is not None:
+            if self.graveyard is None or self.graveyard != build_strategy_graveyard_entry(
+                self.decision
+            ):
+                raise ValueError("rejected validation workflow requires the canonical graveyard")
+        elif self.graveyard is not None:
             raise ValueError("non-rejected validation workflow must not create graveyard state")
         return self
+
+    @property
+    def graveyard_id(self) -> str | None:
+        """Return the linked rejected-strategy identity when the workflow was rejected."""
+
+        return self.graveyard.graveyard_id if self.graveyard is not None else None
 
 
 def validation_report_name(decision: ValidationDecision) -> str:
     """Return the immutable report filename derived from decision identity."""
 
     return f"{VALIDATION_REPORT_PREFIX}{validation_decision_identity(decision)}.md"
+
+
+def _require_bound_quantitative_evidence(
+    *,
+    case: ValidationCase,
+    evidence: BaseModel | None,
+    source_kind: ValidationEvidenceSourceKind,
+    label: str,
+) -> None:
+    """Reject supplied quantitative evidence that is not checksum-bound to the validation case."""
+
+    if evidence is None:
+        return
+    checksum = sha256_json(evidence.model_dump(mode="json"))
+    if not any(
+        ref.source_kind == source_kind and ref.checksum == checksum for ref in case.evidence
+    ):
+        raise_research_error(
+            ResearchRegistryError,
+            "validation_report_unbound_evidence",
+            f"supplied {label} evidence must be checksum-bound to the validation case.",
+        )
 
 
 def _validate_report_inputs(
@@ -133,12 +178,27 @@ def _validate_report_inputs(
             "validation_report_policy_mismatch",
             "validation report policy must match the canonical validation case.",
         )
-    if source_result.experiment_id != case.experiment_id or result_identity(source_result) != case.result_id:
+    if (
+        source_result.experiment_id != case.experiment_id
+        or result_identity(source_result) != case.result_id
+    ):
         raise_research_error(
             ResearchRegistryError,
             "validation_report_source_result_mismatch",
             "validation report source result must match the canonical validation case.",
         )
+    _require_bound_quantitative_evidence(
+        case=case,
+        evidence=robustness_evidence,
+        source_kind=ValidationEvidenceSourceKind.ROBUSTNESS_EVIDENCE,
+        label="robustness",
+    )
+    _require_bound_quantitative_evidence(
+        case=case,
+        evidence=resampling_evidence,
+        source_kind=ValidationEvidenceSourceKind.RESAMPLING_EVIDENCE,
+        label="resampling",
+    )
     expected = evaluate_validation_case(
         case=case,
         source_result=source_result,
@@ -177,7 +237,7 @@ def render_validation_report(
     resampling_evidence: CanonicalResamplingEvidence | None = None,
     graveyard_entry: StrategyGraveyardEntry | None = None,
 ) -> str:
-    """Render a deterministic human-auditable report over the entire Phase 2 gate path."""
+    """Render deterministic Markdown over the complete Phase 2 validation gate path."""
 
     _validate_report_inputs(
         case=case,
@@ -229,9 +289,18 @@ def render_validation_report(
     if robustness_evidence is None:
         lines.append("- Not supplied to this validation decision.")
     else:
-        lines.append(f"- Baseline scenario: {_code_span(robustness_evidence.baseline_scenario_id)}")
-        lines.append(f"- Scenario count: {_code_span(str(len(robustness_evidence.scenario_ids)))}")
+        lines.append(
+            f"- Baseline scenario: {_code_span(robustness_evidence.baseline_scenario_id)}"
+        )
+        lines.append(
+            f"- Scenario count: {_code_span(str(len(robustness_evidence.scenario_ids)))}"
+        )
         for summary in robustness_evidence.summaries:
+            relative = (
+                "undefined"
+                if summary.relative_degradation is None
+                else _number(summary.relative_degradation)
+            )
             lines.extend(
                 [
                     f"### {_code_span(summary.metric_name)}",
@@ -240,13 +309,9 @@ def render_validation_report(
                     f"- Coverage: {_code_span(_number(summary.coverage_fraction))}",
                     f"- Baseline: {_code_span(_number(summary.baseline_value))}",
                     f"- Worst: {_code_span(_number(summary.worst_value))}",
-                    f"- Absolute degradation: {_code_span(_number(summary.absolute_degradation))}",
-                    "- Relative degradation: "
-                    + _code_span(
-                        "undefined"
-                        if summary.relative_degradation is None
-                        else _number(summary.relative_degradation)
-                    ),
+                    "- Absolute degradation: "
+                    + _code_span(_number(summary.absolute_degradation)),
+                    f"- Relative degradation: {_code_span(relative)}",
                     "",
                 ]
             )
@@ -256,14 +321,16 @@ def render_validation_report(
         lines.append("- Not supplied to this validation decision.")
     else:
         config = resampling_evidence.config
+        block_size = "none" if config.block_size is None else str(config.block_size)
         lines.extend(
             [
                 f"- Method: {_code_span(config.method.value)}",
                 f"- Sample count: {_code_span(str(config.sample_count))}",
                 f"- Seed: {_code_span(str(config.seed))}",
-                f"- Block size: {_code_span('none' if config.block_size is None else str(config.block_size))}",
+                f"- Block size: {_code_span(block_size)}",
                 f"- Source return count: {_code_span(str(resampling_evidence.source_return_count))}",
-                f"- Source return SHA-256: {_code_span(resampling_evidence.source_return_checksum)}",
+                "- Source return SHA-256: "
+                + _code_span(resampling_evidence.source_return_checksum),
                 f"- Loss frequency: {_code_span(_number(resampling_evidence.loss_frequency))}",
                 "- Drawdown-breach frequency: "
                 + _code_span(_number(resampling_evidence.drawdown_breach_frequency)),
@@ -353,10 +420,11 @@ def write_validation_report(
             "validation_report_checksum_mismatch",
             "persisted validation report checksum does not match rendered content.",
         )
+    path = artifact_store.artifact_path(case.experiment_id, name)
     return ValidationReportArtifact(
         decision_id=decision_id,
         validation_id=case.validation_id,
-        relative_path=artifact_store.relative_path(artifact_store.artifact_path(case.experiment_id, name)),
+        relative_path=artifact_store.relative_path(path),
         checksum=checksum,
     )
 
@@ -389,7 +457,6 @@ def run_validation_workflow(
             "persisted validation decision differs from the evaluated decision.",
         )
 
-    graveyard_id: str | None = None
     graveyard_entry: StrategyGraveyardEntry | None = None
     if decision.verdict == ValidationVerdict.REJECTED:
         graveyard_id = memory.record_graveyard_entry(decision)
@@ -408,7 +475,7 @@ def run_validation_workflow(
     return ValidationWorkflowResult(
         decision=decision,
         decision_id=decision_id,
-        graveyard_id=graveyard_id,
+        graveyard=graveyard_entry,
         report=report,
     )
 
@@ -430,9 +497,13 @@ def _code_span(value: str) -> str:
     """Render arbitrary scalar text in a delimiter-safe Markdown code span."""
 
     normalized = value.replace("\r", r"\r").replace("\n", r"\n")
-    longest_run = max((len(match.group(0)) for match in _BACKTICK_RUN.finditer(normalized)), default=0)
+    longest_run = max(
+        (len(match.group(0)) for match in _BACKTICK_RUN.finditer(normalized)),
+        default=0,
+    )
     fence = "`" * (longest_run + 1)
-    padding = " " if normalized.startswith(("`", " ")) or normalized.endswith(("`", " ")) else ""
+    needs_padding = normalized.startswith(("`", " ")) or normalized.endswith(("`", " "))
+    padding = " " if needs_padding else ""
     return f"{fence}{padding}{normalized}{padding}{fence}"
 
 
@@ -448,8 +519,15 @@ def _number(value: float) -> str:
     return json.dumps(value, allow_nan=False)
 
 
-def _distribution(summary: BaseModel) -> str:
+def _distribution(summary: ResamplingDistributionSummary) -> str:
     """Render a canonical resampling distribution summary on one deterministic line."""
 
-    values = summary.model_dump(mode="python")
-    return ", ".join(f"{name}={_code_span(_number(float(values[name])))}" for name in ("minimum", "p05", "median", "p95", "maximum"))
+    return ", ".join(
+        (
+            f"minimum={_code_span(_number(summary.minimum))}",
+            f"p05={_code_span(_number(summary.p05))}",
+            f"median={_code_span(_number(summary.median))}",
+            f"p95={_code_span(_number(summary.p95))}",
+            f"maximum={_code_span(_number(summary.maximum))}",
+        )
+    )
