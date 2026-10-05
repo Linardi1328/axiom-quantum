@@ -1,3 +1,10 @@
+from spy_market_agent.intelligence.axiom_evidence import (
+    INTELLIGENCE_EVIDENCE_ID_VERSION,
+    INTELLIGENCE_EVIDENCE_SCHEMA_VERSION,
+    MarketIntelligenceEvidence,
+    build_market_intelligence_evidence,
+    intelligence_evidence_identity,
+)
 from spy_market_agent.intelligence.axiom_session import (
     INTELLIGENCE_SESSION_ID_VERSION,
     INTELLIGENCE_SESSION_SCHEMA_VERSION,
@@ -54,6 +61,8 @@ from spy_market_agent.intelligence.state import (
 )
 
 __all__ = [
+    "INTELLIGENCE_EVIDENCE_ID_VERSION",
+    "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION",
     "INTELLIGENCE_SESSION_ID_VERSION",
     "INTELLIGENCE_SESSION_SCHEMA_VERSION",
     "LEGACY_SPY_INSTRUMENT_PROFILE",
@@ -76,6 +85,7 @@ __all__ = [
     "InstrumentProfile",
     "IntelligenceRunIdentity",
     "IntelligenceSession",
+    "MarketIntelligenceEvidence",
     "MarketStateDimension",
     "MarketStateSnapshot",
     "SPYMarketStateDerivation",
@@ -89,10 +99,12 @@ __all__ = [
     "StateAvailability",
     "assess_scenario_actionability",
     "build_intelligence_session",
+    "build_market_intelligence_evidence",
     "derive_intelligence_run_identity",
     "derive_series_snapshot_id",
     "derive_spy_market_state",
     "evidence_reference_ids",
+    "intelligence_evidence_identity",
     "intelligence_session_identity",
     "legacy_spy_market_data_to_snapshot",
 ]
