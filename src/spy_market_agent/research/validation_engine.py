@@ -59,12 +59,16 @@ class MetricThreshold(BaseModel):
     @field_validator("gate_id", "metric_name")
     @classmethod
     def _safe_identifier(cls, value: str) -> str:
+        """Require path-safe metric gate identifiers."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("metric threshold identifiers must be path-safe")
         return value
 
     @model_validator(mode="after")
     def _validate_threshold(self) -> MetricThreshold:
+        """Require finite explicit bounds on a real validation evidence stage."""
+
         if self.stage not in VALIDATION_REQUIRED_EVIDENCE_STAGES:
             raise ValueError("metric threshold stage must be a required evidence stage")
         if self.minimum is None and self.maximum is None:
@@ -97,12 +101,16 @@ class RobustnessThreshold(BaseModel):
     @field_validator("gate_id", "metric_name")
     @classmethod
     def _safe_identifier(cls, value: str) -> str:
+        """Require path-safe robustness gate identifiers."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("robustness threshold identifiers must be path-safe")
         return value
 
     @model_validator(mode="after")
     def _validate_threshold(self) -> RobustnessThreshold:
+        """Require at least one finite, nonnegative robustness constraint."""
+
         if (
             self.minimum_coverage is None
             and self.maximum_absolute_degradation is None
@@ -132,12 +140,16 @@ class ResamplingThreshold(BaseModel):
     @field_validator("gate_id")
     @classmethod
     def _gate_id(cls, value: str) -> str:
+        """Require a path-safe resampling gate identifier."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("resampling gate_id must be path-safe")
         return value
 
     @model_validator(mode="after")
     def _validate_threshold(self) -> ResamplingThreshold:
+        """Require empirical frequency limits within the unit interval."""
+
         for value in (
             self.maximum_loss_frequency,
             self.maximum_drawdown_breach_frequency,
@@ -162,12 +174,16 @@ class ValidationPolicy(BaseModel):
     @field_validator("policy_id")
     @classmethod
     def _policy_id(cls, value: str) -> str:
+        """Require a path-safe caller-assigned policy identifier."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("validation policy_id must be path-safe")
         return value
 
     @model_validator(mode="after")
     def _canonical_gates(self) -> ValidationPolicy:
+        """Reject duplicate gate IDs and canonicalize threshold ordering."""
+
         all_ids = [item.gate_id for item in self.metric_thresholds]
         all_ids.extend(item.gate_id for item in self.robustness_thresholds)
         if self.resampling_threshold is not None:
@@ -215,6 +231,8 @@ class ValidationGateResult(BaseModel):
 
     @model_validator(mode="after")
     def _validate_gate(self) -> ValidationGateResult:
+        """Require a required stage with deterministic checks and explanatory reasons."""
+
         if self.stage not in VALIDATION_REQUIRED_EVIDENCE_STAGES:
             raise ValueError("gate result stage must be a required evidence stage")
         if not self.check_ids:
@@ -243,6 +261,8 @@ class ValidationDecision(BaseModel):
 
     @model_validator(mode="after")
     def _complete_gate_set(self) -> ValidationDecision:
+        """Require exactly one canonical gate per stage and a derived verdict."""
+
         stages = tuple(item.stage for item in self.gates)
         if stages != VALIDATION_REQUIRED_EVIDENCE_STAGES:
             raise ValueError("validation decision must contain exactly one gate per required stage")
@@ -253,6 +273,8 @@ class ValidationDecision(BaseModel):
 
 
 def _numeric_metric(result: ExperimentResult, metric_name: str) -> float | None:
+    """Return one finite numeric result metric or None when it cannot support a gate."""
+
     value = result.metric_snapshot.get(metric_name)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -261,6 +283,8 @@ def _numeric_metric(result: ExperimentResult, metric_name: str) -> float | None:
 
 
 def _verdict_from_gates(gates: tuple[ValidationGateResult, ...]) -> ValidationVerdict:
+    """Derive the fail-closed research verdict from canonical stage outcomes."""
+
     if any(gate.status == ValidationGateStatus.MISSING for gate in gates):
         return ValidationVerdict.INSUFFICIENT_EVIDENCE
     if any(gate.status == ValidationGateStatus.FAILED for gate in gates):
@@ -272,6 +296,8 @@ def _robustness_summary(
     evidence: CanonicalRobustnessEvidence,
     metric_name: str,
 ) -> MetricRobustnessSummary | None:
+    """Return the declared robustness summary for a metric when present."""
+
     return next((item for item in evidence.summaries if item.metric_name == metric_name), None)
 
 
