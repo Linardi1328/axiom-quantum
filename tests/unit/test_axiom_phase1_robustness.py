@@ -8,7 +8,9 @@ from pydantic import ValidationError
 
 from spy_market_agent.research.experiment_core import StrategyResearchState
 from spy_market_agent.research.robustness import (
+    CanonicalRobustnessEvidence,
     MetricDirection,
+    MetricRobustnessSummary,
     RobustnessScenario,
     RobustnessScenarioKind,
     canonical_robustness_evidence,
@@ -99,6 +101,33 @@ def test_zero_baseline_omits_relative_degradation() -> None:
 
     assert evidence.summaries[0].absolute_degradation == pytest.approx(0.02)
     assert evidence.summaries[0].relative_degradation is None
+
+
+def test_direct_evidence_rejects_summary_scenario_count_mismatch() -> None:
+    """Direct construction cannot report coverage against a different scenario universe."""
+
+    summary = MetricRobustnessSummary(
+        metric_name="score",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        observation_count=2,
+        total_scenario_count=2,
+        coverage_fraction=1.0,
+        baseline_value=1.0,
+        minimum=0.8,
+        median=0.9,
+        mean=0.9,
+        maximum=1.0,
+        worst_value=0.8,
+        absolute_degradation=0.2,
+        relative_degradation=0.2,
+    )
+
+    with pytest.raises(ValidationError, match="total_scenario_count must match scenario_ids"):
+        CanonicalRobustnessEvidence(
+            baseline_scenario_id="baseline",
+            scenario_ids=("baseline", "stress", "third"),
+            summaries=(summary,),
+        )
 
 
 def test_robustness_evidence_fails_closed_on_invalid_inputs() -> None:
