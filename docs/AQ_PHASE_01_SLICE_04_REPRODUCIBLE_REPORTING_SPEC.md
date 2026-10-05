@@ -46,9 +46,28 @@ The renderer:
 - sorts dependency versions, metric names, and evidence references;
 - formats metric values through deterministic JSON scalar formatting;
 - emits a final newline;
-- excludes operator notes because they are not part of scientific experiment identity.
+- excludes operator notes because they are not part of scientific experiment identity;
+- escapes Markdown metacharacters and raw-HTML delimiters in free-form research prose;
+- renders version strings, metric values, and evidence paths through delimiter-safe code spans;
+- normalizes carriage returns and newlines inside code-span fields to literal escape sequences.
 
 The same canonical input pair must produce byte-identical UTF-8 Markdown.
+
+## Markdown Safety
+
+Canonical research text is valid scientific input but is not trusted Markdown structure. The
+report template therefore owns all headings, lists, and authority statements. Free-form experiment
+names, hypotheses, questions, result summaries, and conclusions are escaped before being placed
+inside blockquotes so they cannot introduce headings, links, emphasis, raw HTML, or fake authority
+sections.
+
+Fields presented as code are wrapped with a fence longer than any backtick run contained in the
+value. This preserves literal backticks without allowing a value to terminate its code span. Any
+embedded CR/LF characters in those fields are represented as literal `\\r` / `\\n` text rather
+than structural Markdown line breaks.
+
+These controls protect the human-audit meaning of the report. They do not change experiment or
+result identity and do not create any execution authority.
 
 ## Artifact Semantics
 
@@ -91,6 +110,8 @@ This slice does not add:
 - report artifact references do not create result-identity recursion;
 - mismatched experiment/result pairs fail closed;
 - operator notes are not rendered;
+- free-form research text cannot introduce trusted report structure;
+- code-span fields containing backticks or newlines remain literal display data;
 - metrics and evidence references have deterministic ordering;
 - the report explicitly records the research-only authority boundary;
 - append-only/idempotent artifact semantics are preserved;
