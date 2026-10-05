@@ -1,3 +1,10 @@
+from spy_market_agent.intelligence.axiom_session import (
+    INTELLIGENCE_SESSION_ID_VERSION,
+    INTELLIGENCE_SESSION_SCHEMA_VERSION,
+    IntelligenceSession,
+    build_intelligence_session,
+    intelligence_session_identity,
+)
 from spy_market_agent.intelligence.contracts import (
     AnalysisHorizon,
     AnalysisProfile,
@@ -47,6 +54,8 @@ from spy_market_agent.intelligence.state import (
 )
 
 __all__ = [
+    "INTELLIGENCE_SESSION_ID_VERSION",
+    "INTELLIGENCE_SESSION_SCHEMA_VERSION",
     "LEGACY_SPY_INSTRUMENT_PROFILE",
     "LEGACY_SPY_SERIES_ID",
     "MI1_IWM_DAILY_SERIES_ID",
@@ -66,6 +75,7 @@ __all__ = [
     "HorizonUnit",
     "InstrumentProfile",
     "IntelligenceRunIdentity",
+    "IntelligenceSession",
     "MarketStateDimension",
     "MarketStateSnapshot",
     "SPYMarketStateDerivation",
@@ -78,9 +88,11 @@ __all__ = [
     "SessionModel",
     "StateAvailability",
     "assess_scenario_actionability",
+    "build_intelligence_session",
     "derive_intelligence_run_identity",
     "derive_series_snapshot_id",
     "derive_spy_market_state",
     "evidence_reference_ids",
+    "intelligence_session_identity",
     "legacy_spy_market_data_to_snapshot",
 ]
