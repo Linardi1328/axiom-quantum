@@ -14,6 +14,8 @@ from spy_market_agent.research.validation_engine import (
     ValidationVerdict,
 )
 from spy_market_agent.research.validation_memory import (
+    GraveyardFailedGate,
+    StrategyGraveyardEntry,
     ValidationMemoryRegistry,
     build_strategy_graveyard_entry,
     strategy_graveyard_identity,
@@ -132,6 +134,38 @@ def test_graveyard_requires_decision_to_exist_in_validation_memory(tmp_path: Pat
 
     with pytest.raises(ResearchArtifactError, match="required research artifact is missing"):
         registry.record_graveyard_entry(decision)
+
+
+def test_tampered_graveyard_failure_evidence_fails_closed(tmp_path: Path) -> None:
+    """Recomputed IDs cannot legitimize failed-gate evidence that differs from the decision."""
+
+    registry = _registry(tmp_path)
+    decision = _decision(ValidationVerdict.REJECTED)
+    registry.record_decision(decision)
+    canonical = build_strategy_graveyard_entry(decision)
+    tampered_gate = GraveyardFailedGate(
+        stage=canonical.failed_gates[0].stage,
+        check_ids=canonical.failed_gates[0].check_ids,
+        reasons=("different but structurally valid failure reason",),
+    )
+    provisional = canonical.model_copy(
+        update={
+            "graveyard_id": "aq-graveyard-000000000000000000000000",
+            "failed_gates": (tampered_gate,),
+        }
+    )
+    tampered = StrategyGraveyardEntry.model_validate(
+        provisional.model_dump(mode="python")
+        | {"graveyard_id": strategy_graveyard_identity(provisional)}
+    )
+    registry.store.write_json(
+        EXPERIMENT_ID,
+        f"axiom_strategy_graveyard_{tampered.graveyard_id}.json",
+        tampered,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="strategy_graveyard_link_mismatch"):
+        registry.load_graveyard_entry(EXPERIMENT_ID, tampered.graveyard_id)
 
 
 def test_corrupt_decision_and_graveyard_records_fail_closed(tmp_path: Path) -> None:
