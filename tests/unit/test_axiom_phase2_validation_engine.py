@@ -48,6 +48,8 @@ COMPLETED_AT = datetime(2026, 10, 5, 14, 0, tzinfo=UTC)
 
 
 def _candidate_result(*, sharpe: float = 1.2) -> ExperimentResult:
+    """Build a completed validation-candidate result with configurable Sharpe."""
+
     return ExperimentResult(
         experiment_id="aq-exp-111111111111111111111111",
         lifecycle_state=ExperimentLifecycleState.COMPLETED,
@@ -61,6 +63,8 @@ def _candidate_result(*, sharpe: float = 1.2) -> ExperimentResult:
 
 
 def _robustness_evidence() -> CanonicalRobustnessEvidence:
+    """Build deterministic baseline/cost-stress robustness evidence."""
+
     return canonical_robustness_evidence(
         scenarios=(
             RobustnessScenario(
@@ -80,6 +84,8 @@ def _robustness_evidence() -> CanonicalRobustnessEvidence:
 
 
 def _resampling_evidence() -> CanonicalResamplingEvidence:
+    """Build deterministic empirical resampling evidence for verdict tests."""
+
     return CanonicalResamplingEvidence(
         source_return_count=20,
         source_return_checksum="b" * 64,
@@ -115,6 +121,8 @@ def _evidence_refs(
     omit: ValidationStage | None = None,
     bind_quantitative: bool = True,
 ) -> tuple[ValidationEvidenceRef, ...]:
+    """Build a complete evidence manifest with optional stage omission or unbound evidence."""
+
     refs = []
     robustness_checksum = sha256_json(robustness.model_dump(mode="json"))
     resampling_checksum = sha256_json(resampling.model_dump(mode="json"))
@@ -147,6 +155,8 @@ def _policy(
     max_degradation: float = 0.30,
     max_loss_frequency: float = 0.20,
 ) -> ValidationPolicy:
+    """Build an explicit validation policy with configurable rejection bounds."""
+
     return ValidationPolicy(
         policy_id="validation-policy-v1",
         metric_thresholds=(
@@ -183,6 +193,8 @@ def _case(
     omit: ValidationStage | None = None,
     bind_quantitative: bool = True,
 ) -> ValidationCase:
+    """Build a content-bound validation case for the supplied test evidence."""
+
     return build_validation_case(
         result=result,
         policy_id=policy.policy_id,
@@ -202,10 +214,14 @@ def _inputs() -> tuple[
     CanonicalRobustnessEvidence,
     CanonicalResamplingEvidence,
 ]:
+    """Return the standard passing validation inputs used across tests."""
+
     return _candidate_result(), _policy(), _robustness_evidence(), _resampling_evidence()
 
 
 def test_all_required_stages_pass_to_validated_research_candidate() -> None:
+    """All complete, bound evidence and passing thresholds yield a validated candidate."""
+
     result, policy, robustness, resampling = _inputs()
     decision = evaluate_validation_case(
         case=_case(
@@ -228,6 +244,8 @@ def test_all_required_stages_pass_to_validated_research_candidate() -> None:
 
 
 def test_missing_required_stage_is_insufficient_evidence() -> None:
+    """A missing required stage fails closed as insufficient evidence."""
+
     result, policy, robustness, resampling = _inputs()
     decision = evaluate_validation_case(
         case=_case(
@@ -249,6 +267,8 @@ def test_missing_required_stage_is_insufficient_evidence() -> None:
 
 
 def test_metric_threshold_failure_rejects_complete_case() -> None:
+    """A complete case is rejected when an explicit source-result metric gate fails."""
+
     result = _candidate_result()
     policy = _policy(minimum_sharpe=2.0)
     robustness = _robustness_evidence()
@@ -272,6 +292,8 @@ def test_metric_threshold_failure_rejects_complete_case() -> None:
 
 
 def test_robustness_threshold_failure_rejects_complete_case() -> None:
+    """A complete case is rejected when its bound robustness degradation exceeds policy."""
+
     result = _candidate_result()
     policy = _policy(max_degradation=0.10)
     robustness = _robustness_evidence()
@@ -295,6 +317,8 @@ def test_robustness_threshold_failure_rejects_complete_case() -> None:
 
 
 def test_resampling_threshold_failure_rejects_complete_case() -> None:
+    """A complete case is rejected when empirical resampling risk exceeds policy."""
+
     result = _candidate_result()
     policy = _policy(max_loss_frequency=0.05)
     robustness = _robustness_evidence()
@@ -318,6 +342,8 @@ def test_resampling_threshold_failure_rejects_complete_case() -> None:
 
 
 def test_missing_quantitative_evidence_never_silently_passes() -> None:
+    """Required quantitative objects that are absent produce insufficient evidence."""
+
     result, policy, robustness, resampling = _inputs()
     decision = evaluate_validation_case(
         case=_case(
@@ -339,6 +365,8 @@ def test_missing_quantitative_evidence_never_silently_passes() -> None:
 
 
 def test_same_policy_id_with_different_thresholds_fails_closed() -> None:
+    """Reusing a policy ID with different contents cannot alter an existing case."""
+
     result, policy, robustness, resampling = _inputs()
     case = _case(
         result,
@@ -361,6 +389,8 @@ def test_same_policy_id_with_different_thresholds_fails_closed() -> None:
 
 
 def test_unreferenced_quantitative_evidence_is_insufficient() -> None:
+    """Quantitative objects without matching case references cannot support passing gates."""
+
     result, policy, robustness, resampling = _inputs()
     case = _case(
         result,
@@ -384,6 +414,8 @@ def test_unreferenced_quantitative_evidence_is_insufficient() -> None:
 
 
 def test_checksum_substitution_of_favorable_evidence_is_insufficient() -> None:
+    """A favorable but checksum-mismatched evidence object cannot replace referenced evidence."""
+
     result, policy, robustness, resampling = _inputs()
     case = _case(
         result,
@@ -411,6 +443,8 @@ def test_checksum_substitution_of_favorable_evidence_is_insufficient() -> None:
 
 
 def test_case_policy_and_source_identity_mismatches_fail_closed() -> None:
+    """Policy-ID and canonical source-result mismatches are rejected before evaluation."""
+
     result, policy, robustness, resampling = _inputs()
     case = _case(
         result,
@@ -428,6 +462,8 @@ def test_case_policy_and_source_identity_mismatches_fail_closed() -> None:
 
 
 def test_threshold_contracts_reject_hidden_or_invalid_bounds() -> None:
+    """Threshold contracts reject omitted metric bounds and impossible frequencies."""
+
     with pytest.raises(ValidationError, match="explicit minimum or maximum"):
         MetricThreshold(
             gate_id="missing-bound",
