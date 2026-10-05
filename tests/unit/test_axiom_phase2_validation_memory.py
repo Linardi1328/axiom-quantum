@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from spy_market_agent.research.artifacts import ResearchArtifactStore
-from spy_market_agent.research.errors import ResearchRegistryError
+from spy_market_agent.research.errors import ResearchArtifactError, ResearchRegistryError
 from spy_market_agent.research.validation_contract import VALIDATION_REQUIRED_EVIDENCE_STAGES
 from spy_market_agent.research.validation_engine import (
     ValidationDecision,
@@ -118,7 +118,7 @@ def test_graveyard_requires_decision_to_exist_in_validation_memory(tmp_path: Pat
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.REJECTED)
 
-    with pytest.raises(Exception, match="required research artifact is missing"):
+    with pytest.raises(ResearchArtifactError, match="required research artifact is missing"):
         registry.record_graveyard_entry(decision)
 
 
@@ -126,7 +126,7 @@ def test_corrupt_decision_and_graveyard_records_fail_closed(tmp_path: Path) -> N
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.REJECTED)
     decision_id = registry.record_decision(decision)
-    graveyard_id = registry.record_graveyard_entry(decision)
+    registry.record_graveyard_entry(decision)
 
     decision_path = registry.store.artifact_path(
         EXPERIMENT_ID,
@@ -137,7 +137,7 @@ def test_corrupt_decision_and_graveyard_records_fail_closed(tmp_path: Path) -> N
         registry.load_decision(EXPERIMENT_ID, decision_id)
 
     registry = _registry(tmp_path / "second")
-    decision_id = registry.record_decision(decision)
+    registry.record_decision(decision)
     graveyard_id = registry.record_graveyard_entry(decision)
     graveyard_path = registry.store.artifact_path(
         EXPERIMENT_ID,
