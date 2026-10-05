@@ -443,7 +443,8 @@ def evaluate_validation_case(
                 ):
                     missing_reasons.append(
                         "resampling evidence required by "
-                        f"{resampling_threshold.gate_id} is not checksum-bound to this validation case"
+                        f"{resampling_threshold.gate_id} is not checksum-bound to this "
+                        "validation case"
                     )
                 else:
                     resampling_failed = False
