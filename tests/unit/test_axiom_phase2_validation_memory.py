@@ -27,12 +27,16 @@ POLICY_DIGEST = "a" * 64
 
 
 def _registry(tmp_path: Path) -> ValidationMemoryRegistry:
+    """Build isolated append-only validation memory for one test."""
+
     return ValidationMemoryRegistry(
         ResearchArtifactStore(Path("artifacts/research"), repository_root=tmp_path)
     )
 
 
 def _decision(verdict: ValidationVerdict) -> ValidationDecision:
+    """Build a canonical decision fixture for the requested terminal verdict."""
+
     gates: list[ValidationGateResult] = []
     for stage in VALIDATION_REQUIRED_EVIDENCE_STAGES:
         if verdict == ValidationVerdict.REJECTED and stage.value == "backtest":
@@ -64,6 +68,8 @@ def _decision(verdict: ValidationVerdict) -> ValidationDecision:
 
 
 def test_rejected_decision_persists_idempotently_and_enters_graveyard(tmp_path: Path) -> None:
+    """Rejected decisions persist idempotently and create one linked graveyard record."""
+
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.REJECTED)
 
@@ -88,6 +94,8 @@ def test_rejected_decision_persists_idempotently_and_enters_graveyard(tmp_path: 
 
 
 def test_validated_candidate_is_recorded_but_cannot_be_graveyarded(tmp_path: Path) -> None:
+    """Validated research candidates remain in decision memory without graveyard state."""
+
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE)
 
@@ -102,6 +110,8 @@ def test_validated_candidate_is_recorded_but_cannot_be_graveyarded(tmp_path: Pat
 
 
 def test_insufficient_evidence_is_recorded_but_not_graveyarded(tmp_path: Path) -> None:
+    """Insufficient evidence remains queryable without being represented as rejection."""
+
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.INSUFFICIENT_EVIDENCE)
 
@@ -115,6 +125,8 @@ def test_insufficient_evidence_is_recorded_but_not_graveyarded(tmp_path: Path) -
 
 
 def test_graveyard_requires_decision_to_exist_in_validation_memory(tmp_path: Path) -> None:
+    """Graveyard persistence fails closed when its rejected decision is not stored first."""
+
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.REJECTED)
 
@@ -123,6 +135,8 @@ def test_graveyard_requires_decision_to_exist_in_validation_memory(tmp_path: Pat
 
 
 def test_corrupt_decision_and_graveyard_records_fail_closed(tmp_path: Path) -> None:
+    """Corrupted decision and graveyard JSON cannot be loaded as canonical evidence."""
+
     registry = _registry(tmp_path)
     decision = _decision(ValidationVerdict.REJECTED)
     decision_id = registry.record_decision(decision)
