@@ -60,6 +60,8 @@ class IntelligenceSession(BaseModel):
     )
     @classmethod
     def _safe_identifier(cls, value: str) -> str:
+        """Require path-safe identifiers throughout the session lineage."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("Phase 3 identifiers must be nonempty and path-safe")
         return value
@@ -67,6 +69,8 @@ class IntelligenceSession(BaseModel):
     @field_validator("validation_policy_digest", "intelligence_configuration_hash")
     @classmethod
     def _checksum(cls, value: str) -> str:
+        """Require canonical lowercase SHA-256 lineage digests."""
+
         if not _SHA256.fullmatch(value):
             raise ValueError("Phase 3 digests must be lowercase SHA-256 values")
         return value
@@ -74,6 +78,8 @@ class IntelligenceSession(BaseModel):
     @field_validator("as_of")
     @classmethod
     def _aware_as_of(cls, value: datetime) -> datetime:
+        """Normalize the point-in-time analysis cutoff to UTC."""
+
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("as_of must be timezone-aware")
         return value.astimezone(UTC)
@@ -81,6 +87,8 @@ class IntelligenceSession(BaseModel):
     @field_validator("snapshot_ids")
     @classmethod
     def _canonical_snapshots(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Require a nonempty unique canonical snapshot identity set."""
+
         if not value:
             raise ValueError("Phase 3 session requires at least one intelligence snapshot")
         if any(not _SAFE_IDENTIFIER.fullmatch(item) for item in value):
@@ -92,12 +100,16 @@ class IntelligenceSession(BaseModel):
     @field_validator("session_id")
     @classmethod
     def _canonical_session_id(cls, value: str) -> str:
+        """Require the canonical Axiom Intelligence OS identity shape."""
+
         if not _SESSION_ID.fullmatch(value):
             raise ValueError("session_id must be a canonical Axiom Intelligence OS identity")
         return value
 
     @model_validator(mode="after")
     def _identity_matches(self) -> IntelligenceSession:
+        """Fail closed when stored identity differs from canonical session content."""
+
         if self.schema_version != INTELLIGENCE_SESSION_SCHEMA_VERSION:
             raise ValueError("unsupported Intelligence OS session schema version")
         if self.session_id != intelligence_session_identity(self):
