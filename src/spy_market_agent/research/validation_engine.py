@@ -13,7 +13,10 @@ from spy_market_agent.research.experiment_core import (
     result_identity,
 )
 from spy_market_agent.research.resampling import CanonicalResamplingEvidence
-from spy_market_agent.research.robustness import CanonicalRobustnessEvidence
+from spy_market_agent.research.robustness import (
+    CanonicalRobustnessEvidence,
+    MetricRobustnessSummary,
+)
 from spy_market_agent.research.validation_contract import (
     VALIDATION_REQUIRED_EVIDENCE_STAGES,
     ValidationCase,
@@ -67,7 +70,11 @@ class MetricThreshold(BaseModel):
         bounds = tuple(value for value in (self.minimum, self.maximum) if value is not None)
         if any(not math.isfinite(value) for value in bounds):
             raise ValueError("metric threshold bounds must be finite")
-        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+        if (
+            self.minimum is not None
+            and self.maximum is not None
+            and self.minimum > self.maximum
+        ):
             raise ValueError("metric threshold minimum cannot exceed maximum")
         return self
 
@@ -138,7 +145,9 @@ class ResamplingThreshold(BaseModel):
             self.maximum_drawdown_breach_frequency,
         ):
             if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-                raise ValueError("resampling frequency limits must be finite and between zero and one")
+                raise ValueError(
+                    "resampling frequency limits must be finite and between zero and one"
+                )
         return self
 
 
@@ -170,13 +179,21 @@ class ValidationPolicy(BaseModel):
         object.__setattr__(
             self,
             "metric_thresholds",
-            tuple(sorted(self.metric_thresholds, key=lambda item: (item.stage.value, item.gate_id))),
+            tuple(
+                sorted(
+                    self.metric_thresholds,
+                    key=lambda item: (item.stage.value, item.gate_id),
+                )
+            ),
         )
         object.__setattr__(
             self,
             "robustness_thresholds",
             tuple(
-                sorted(self.robustness_thresholds, key=lambda item: (item.stage.value, item.gate_id))
+                sorted(
+                    self.robustness_thresholds,
+                    key=lambda item: (item.stage.value, item.gate_id),
+                )
             ),
         )
         return self
@@ -249,7 +266,7 @@ def _verdict_from_gates(gates: tuple[ValidationGateResult, ...]) -> ValidationVe
 def _robustness_summary(
     evidence: CanonicalRobustnessEvidence,
     metric_name: str,
-):
+) -> MetricRobustnessSummary | None:
     return next((item for item in evidence.summaries if item.metric_name == metric_name), None)
 
 
@@ -267,7 +284,10 @@ def evaluate_validation_case(
         raise ValueError("validation case policy_id must match the supplied policy")
     if source_result.strategy_state != StrategyResearchState.VALIDATION_CANDIDATE:
         raise ValueError("validation source result must remain a validation_candidate")
-    if source_result.experiment_id != case.experiment_id or result_identity(source_result) != case.result_id:
+    if (
+        source_result.experiment_id != case.experiment_id
+        or result_identity(source_result) != case.result_id
+    ):
         raise ValueError("validation source result must match the canonical validation case")
 
     evidenced_stages = set(case.evidenced_stages)
@@ -288,7 +308,8 @@ def evaluate_validation_case(
             value = _numeric_metric(source_result, threshold.metric_name)
             if value is None:
                 missing_reasons.append(
-                    f"metric {threshold.metric_name} required by {threshold.gate_id} is missing or nonnumeric"
+                    f"metric {threshold.metric_name} required by {threshold.gate_id} "
+                    "is missing or nonnumeric"
                 )
                 continue
             if threshold.minimum is not None and value < threshold.minimum:
@@ -312,7 +333,8 @@ def evaluate_validation_case(
             summary = _robustness_summary(robustness_evidence, threshold.metric_name)
             if summary is None:
                 missing_reasons.append(
-                    f"robustness metric {threshold.metric_name} required by {threshold.gate_id} is unavailable"
+                    f"robustness metric {threshold.metric_name} required by "
+                    f"{threshold.gate_id} is unavailable"
                 )
                 continue
             failed = False
@@ -322,7 +344,8 @@ def evaluate_validation_case(
             ):
                 failed = True
                 failed_reasons.append(
-                    f"robustness coverage {summary.coverage_fraction} is below {threshold.minimum_coverage}"
+                    f"robustness coverage {summary.coverage_fraction} is below "
+                    f"{threshold.minimum_coverage}"
                 )
             if (
                 threshold.maximum_absolute_degradation is not None
@@ -336,7 +359,8 @@ def evaluate_validation_case(
             if threshold.maximum_relative_degradation is not None:
                 if summary.relative_degradation is None:
                     missing_reasons.append(
-                        f"robustness relative degradation required by {threshold.gate_id} is undefined"
+                        "robustness relative degradation required by "
+                        f"{threshold.gate_id} is undefined"
                     )
                 elif summary.relative_degradation > threshold.maximum_relative_degradation:
                     failed = True
@@ -344,7 +368,9 @@ def evaluate_validation_case(
                         f"robustness relative degradation {summary.relative_degradation} exceeds "
                         f"{threshold.maximum_relative_degradation}"
                     )
-            if not failed and not any(threshold.gate_id in reason for reason in missing_reasons):
+            if not failed and not any(
+                threshold.gate_id in reason for reason in missing_reasons
+            ):
                 passed_reasons.append(f"robustness threshold {threshold.gate_id} passed")
 
         if stage == ValidationStage.RESAMPLING and policy.resampling_threshold is not None:
@@ -365,7 +391,7 @@ def evaluate_validation_case(
                     > threshold.maximum_drawdown_breach_frequency
                 ):
                     failed_reasons.append(
-                        f"resampling drawdown-breach frequency "
+                        "resampling drawdown-breach frequency "
                         f"{resampling_evidence.drawdown_breach_frequency} exceeds "
                         f"{threshold.maximum_drawdown_breach_frequency}"
                     )
@@ -380,7 +406,9 @@ def evaluate_validation_case(
             reasons = tuple(failed_reasons + passed_reasons)
         else:
             status = ValidationGateStatus.PASSED
-            reasons = tuple(passed_reasons or [f"stage {stage.value} passed structural evidence checks"])
+            reasons = tuple(
+                passed_reasons or [f"stage {stage.value} passed structural evidence checks"]
+            )
 
         gate_results.append(
             ValidationGateResult(
