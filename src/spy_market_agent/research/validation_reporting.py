@@ -289,12 +289,8 @@ def render_validation_report(
     if robustness_evidence is None:
         lines.append("- Not supplied to this validation decision.")
     else:
-        lines.append(
-            f"- Baseline scenario: {_code_span(robustness_evidence.baseline_scenario_id)}"
-        )
-        lines.append(
-            f"- Scenario count: {_code_span(str(len(robustness_evidence.scenario_ids)))}"
-        )
+        lines.append(f"- Baseline scenario: {_code_span(robustness_evidence.baseline_scenario_id)}")
+        lines.append(f"- Scenario count: {_code_span(str(len(robustness_evidence.scenario_ids)))}")
         for summary in robustness_evidence.summaries:
             relative = (
                 "undefined"
@@ -309,8 +305,7 @@ def render_validation_report(
                     f"- Coverage: {_code_span(_number(summary.coverage_fraction))}",
                     f"- Baseline: {_code_span(_number(summary.baseline_value))}",
                     f"- Worst: {_code_span(_number(summary.worst_value))}",
-                    "- Absolute degradation: "
-                    + _code_span(_number(summary.absolute_degradation)),
+                    "- Absolute degradation: " + _code_span(_number(summary.absolute_degradation)),
                     f"- Relative degradation: {_code_span(relative)}",
                     "",
                 ]
