@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path, PurePosixPath
@@ -21,6 +22,8 @@ RESEARCH_REPORT_SCHEMA_VERSION = "axiom-research-report-v1"
 RESEARCH_REPORT_PREFIX = "axiom_report_"
 _REPORT_RESULT_ID = re.compile(r"^aq-result-[0-9a-f]{24}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|~])")
+_BACKTICK_RUN = re.compile(r"`+")
 
 
 class ResearchReportArtifact(BaseModel):
@@ -36,6 +39,8 @@ class ResearchReportArtifact(BaseModel):
     @field_validator("result_id")
     @classmethod
     def _result_id(cls, value: str) -> str:
+        """Require the report to reference one canonical Axiom result identity."""
+
         if not _REPORT_RESULT_ID.fullmatch(value):
             raise ValueError("result_id must be a canonical Axiom result identity.")
         return value
@@ -43,6 +48,8 @@ class ResearchReportArtifact(BaseModel):
     @field_validator("relative_path")
     @classmethod
     def _relative_path(cls, value: str) -> str:
+        """Require a traversal-free POSIX path beneath the configured artifact root."""
+
         if not value.strip() or "\\" in value:
             raise ValueError("relative_path must be a nonempty POSIX-style relative path.")
         path = PurePosixPath(value)
@@ -53,6 +60,8 @@ class ResearchReportArtifact(BaseModel):
     @field_validator("checksum")
     @classmethod
     def _checksum(cls, value: str) -> str:
+        """Require the rendered report checksum to be canonical lowercase SHA-256."""
+
         if not _SHA256.fullmatch(value):
             raise ValueError("checksum must be a lowercase SHA-256 digest.")
         return value
@@ -82,14 +91,15 @@ def render_research_report(
     lines = [
         "# Axiom Quantum Research Report",
         "",
-        f"- Report schema: `{RESEARCH_REPORT_SCHEMA_VERSION}`",
-        f"- Experiment ID: `{experiment_id}`",
-        f"- Result ID: `{result_id}`",
-        f"- Execution authority: `{definition.execution_authority}`",
+        f"- Report schema: {_code_span(RESEARCH_REPORT_SCHEMA_VERSION)}",
+        f"- Experiment ID: {_code_span(experiment_id)}",
+        f"- Result ID: {_code_span(result_id)}",
+        f"- Execution authority: {_code_span(definition.execution_authority)}",
         "",
         "## Research question",
         "",
-        f"**Name:** {definition.name}",
+        "**Name:**",
+        *_blockquote(definition.name),
         "",
         "**Hypothesis:**",
         *_blockquote(definition.hypothesis),
@@ -100,8 +110,8 @@ def render_research_report(
         "## Scientific definition",
         "",
         f"- Assets: {_code_list(definition.asset_universe)}",
-        f"- Evaluation protocol: `{definition.evaluation_protocol}`",
-        f"- Cost model: `{definition.cost_model_id}`",
+        f"- Evaluation protocol: {_code_span(definition.evaluation_protocol)}",
+        f"- Cost model: {_code_span(definition.cost_model_id)}",
         f"- Feature families: {_code_list(definition.feature_families)}",
         f"- Strategy IDs: {_code_list(definition.strategy_ids)}",
         f"- Model IDs: {_code_list(definition.model_ids)}",
@@ -114,13 +124,13 @@ def render_research_report(
     for dataset in definition.datasets:
         lines.extend(
             [
-                f"### `{dataset.dataset_id}`",
+                f"### {_code_span(dataset.dataset_id)}",
                 "",
-                f"- Checksum: `{dataset.checksum}`",
-                f"- Feature schema: `{dataset.feature_schema}`",
-                f"- Label schema: `{dataset.label_schema}`",
-                f"- First session: `{dataset.first_session.isoformat()}`",
-                f"- Last session: `{dataset.last_session.isoformat()}`",
+                f"- Checksum: {_code_span(dataset.checksum)}",
+                f"- Feature schema: {_code_span(dataset.feature_schema)}",
+                f"- Label schema: {_code_span(dataset.label_schema)}",
+                f"- First session: {_code_span(dataset.first_session.isoformat())}",
+                f"- Last session: {_code_span(dataset.last_session.isoformat())}",
                 "",
             ]
         )
@@ -130,24 +140,24 @@ def render_research_report(
         [
             "## Runtime lineage",
             "",
-            f"- Git commit: `{runtime.git_commit_sha}`",
-            f"- Package version: `{runtime.package_version}`",
-            f"- Python version: `{runtime.python_version}`",
+            f"- Git commit: {_code_span(runtime.git_commit_sha)}",
+            f"- Package version: {_code_span(runtime.package_version)}",
+            f"- Python version: {_code_span(runtime.python_version)}",
             "- Dependencies:",
         ]
     )
     for package, version in sorted(runtime.dependency_versions.items()):
-        lines.append(f"  - `{package}`: `{version}`")
+        lines.append(f"  - {_code_span(package)}: {_code_span(version)}")
 
     lines.extend(
         [
             "",
             "## Result",
             "",
-            f"- Lifecycle: `{result.lifecycle_state.value}`",
-            f"- Outcome: `{result.outcome.value}`",
-            f"- Strategy state: `{result.strategy_state.value}`",
-            f"- Completed at: `{_utc_timestamp(result)}`",
+            f"- Lifecycle: {_code_span(result.lifecycle_state.value)}",
+            f"- Outcome: {_code_span(result.outcome.value)}",
+            f"- Strategy state: {_code_span(result.strategy_state.value)}",
+            f"- Completed at: {_code_span(_utc_timestamp(result))}",
             "",
             "### Summary",
             "",
@@ -163,7 +173,7 @@ def render_research_report(
     )
     if result.metric_snapshot:
         for metric, value in sorted(result.metric_snapshot.items()):
-            lines.append(f"- `{metric}`: `{_metric_value(value)}`")
+            lines.append(f"- {_code_span(metric)}: {_code_span(_metric_value(value))}")
     else:
         lines.append("- No metrics recorded.")
 
@@ -172,10 +182,10 @@ def render_research_report(
         for evidence in sorted(result.evidence, key=lambda item: item.name):
             lines.extend(
                 [
-                    f"### `{evidence.name}`",
+                    f"### {_code_span(evidence.name)}",
                     "",
-                    f"- Path: `{evidence.relative_path}`",
-                    f"- SHA-256: `{evidence.checksum}`",
+                    f"- Path: {_code_span(evidence.relative_path)}",
+                    f"- SHA-256: {_code_span(evidence.checksum)}",
                     "",
                 ]
             )
@@ -224,21 +234,51 @@ def write_research_report(
     )
 
 
+def _escape_markdown_text(value: str) -> str:
+    """Escape untrusted prose so it cannot create Markdown or raw-HTML structure."""
+
+    escaped_html = html.escape(value, quote=False)
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", escaped_html)
+
+
 def _blockquote(value: str) -> list[str]:
-    return [f"> {line}" if line else ">" for line in value.splitlines()]
+    """Render escaped free-form prose inside a trusted Markdown blockquote."""
+
+    escaped = _escape_markdown_text(value)
+    return [f"> {line}" if line else ">" for line in escaped.splitlines()]
+
+
+def _code_span(value: str) -> str:
+    """Render arbitrary single-field text in a delimiter-safe Markdown code span."""
+
+    normalized = value.replace("\r", r"\r").replace("\n", r"\n")
+    longest_run = max(
+        (len(match.group(0)) for match in _BACKTICK_RUN.finditer(normalized)),
+        default=0,
+    )
+    fence = "`" * (longest_run + 1)
+    needs_padding = normalized.startswith(("`", " ")) or normalized.endswith(("`", " "))
+    padding = " " if needs_padding else ""
+    return f"{fence}{padding}{normalized}{padding}{fence}"
 
 
 def _code_list(values: tuple[str, ...]) -> str:
+    """Render canonical identifier tuples as deterministic Markdown code spans."""
+
     if not values:
         return "none"
-    return ", ".join(f"`{value}`" for value in values)
+    return ", ".join(_code_span(value) for value in values)
 
 
 def _metric_value(value: str | int | float | bool | None) -> str:
+    """Serialize one metric scalar deterministically for report display."""
+
     return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
 
 def _utc_timestamp(result: ExperimentResult) -> str:
+    """Render the canonical UTC completion timestamp with an explicit Z suffix."""
+
     return result.completed_at.isoformat().replace("+00:00", "Z")
 
 
