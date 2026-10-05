@@ -38,7 +38,7 @@ class ResearchMigrationReceipt(BaseModel):
         "axiom-research-migration-receipt-v1"
     )
     migration_id: str
-    source_system: Literal["phase3"]
+    source_system: str
     source_experiment_id: str
     source_record_id: str
     experiment_id: str
@@ -51,6 +51,8 @@ class ResearchMigrationReceipt(BaseModel):
 
         if self.schema_version != RESEARCH_MIGRATION_RECEIPT_SCHEMA_VERSION:
             raise ValueError("unsupported research migration receipt schema version")
+        if not self.source_system.strip():
+            raise ValueError("migration source system must be nonempty")
         if not self.source_experiment_id.strip() or not self.source_record_id.strip():
             raise ValueError("migration source identifiers must be nonempty")
         if not self.experiment_id.startswith("aq-exp-"):
@@ -74,6 +76,7 @@ def research_migration_identity(receipt: ResearchMigrationReceipt) -> str:
 
 def _build_receipt(
     *,
+    source_system: str,
     source_experiment_id: str,
     source_record_id: str,
     experiment_id: str,
@@ -82,7 +85,7 @@ def _build_receipt(
 ) -> ResearchMigrationReceipt:
     payload: dict[str, object] = {
         "schema_version": RESEARCH_MIGRATION_RECEIPT_SCHEMA_VERSION,
-        "source_system": "phase3",
+        "source_system": source_system,
         "source_experiment_id": source_experiment_id,
         "source_record_id": source_record_id,
         "experiment_id": experiment_id,
@@ -93,7 +96,7 @@ def _build_receipt(
     migration_id = f"aq-migration-{sha256_json(payload)[:24]}"
     return ResearchMigrationReceipt(
         migration_id=migration_id,
-        source_system="phase3",
+        source_system=source_system,
         source_experiment_id=source_experiment_id,
         source_record_id=source_record_id,
         experiment_id=experiment_id,
@@ -102,16 +105,44 @@ def _build_receipt(
     )
 
 
+def _validate_source_provenance(
+    *,
+    source_system: str,
+    source_experiment_id: str,
+    source_record_id: str,
+) -> None:
+    """Reject incomplete source provenance before any research-memory write occurs."""
+
+    if not source_system.strip():
+        raise_research_error(
+            ResearchRegistryError,
+            "research_migration_source_system_missing",
+            "migration source system must be nonempty.",
+        )
+    if not source_experiment_id.strip() or not source_record_id.strip():
+        raise_research_error(
+            ResearchRegistryError,
+            "research_migration_source_identifier_missing",
+            "migration source identifiers must be nonempty.",
+        )
+
+
 def migrate_canonical_pair_to_research_memory(
     *,
     definition: ExperimentDefinition,
     result: ExperimentResult,
+    source_system: str,
     source_experiment_id: str,
     source_record_id: str,
     registry: ResearchMemoryRegistry | None = None,
 ) -> ResearchMigrationReceipt:
-    """Persist one canonical pair idempotently while preserving its existing research state."""
+    """Persist one canonical pair idempotently while preserving source provenance and state."""
 
+    _validate_source_provenance(
+        source_system=source_system,
+        source_experiment_id=source_experiment_id,
+        source_record_id=source_record_id,
+    )
     expected_experiment_id = experiment_identity(definition)
     if result.experiment_id != expected_experiment_id:
         raise_research_error(
@@ -140,6 +171,7 @@ def migrate_canonical_pair_to_research_memory(
         )
 
     return _build_receipt(
+        source_system=source_system,
         source_experiment_id=source_experiment_id,
         source_record_id=source_record_id,
         experiment_id=experiment_id,
@@ -187,6 +219,7 @@ def migrate_phase3_candidate_to_research_memory(
     return migrate_canonical_pair_to_research_memory(
         definition=definition,
         result=result,
+        source_system="phase3",
         source_experiment_id=manifest.experiment_id,
         source_record_id=evaluation.candidate_name,
         registry=registry,
