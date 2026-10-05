@@ -328,7 +328,8 @@ def render_validation_report(
                 f"- Sample count: {_code_span(str(config.sample_count))}",
                 f"- Seed: {_code_span(str(config.seed))}",
                 f"- Block size: {_code_span(block_size)}",
-                f"- Source return count: {_code_span(str(resampling_evidence.source_return_count))}",
+                "- Source return count: "
+                + _code_span(str(resampling_evidence.source_return_count)),
                 "- Source return SHA-256: "
                 + _code_span(resampling_evidence.source_return_checksum),
                 f"- Loss frequency: {_code_span(_number(resampling_evidence.loss_frequency))}",
@@ -372,9 +373,14 @@ def render_validation_report(
             "",
             "## Authority boundary",
             "",
-            "This validation report is research evidence only. A validated research candidate is not ",
-            "authorized for shadow, paper, broker, or live execution. Insufficient evidence is not a ",
-            "pass, and no verdict in Phase 2 changes execution authority from `none`.",
+            (
+                "This validation report is research evidence only. A validated research candidate "
+                "is not authorized for shadow, paper, broker, or live execution."
+            ),
+            (
+                "Insufficient evidence is not a pass, and no verdict in Phase 2 changes execution "
+                "authority from `none`."
+            ),
             "",
         ]
     )
