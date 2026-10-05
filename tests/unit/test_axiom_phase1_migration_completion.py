@@ -244,7 +244,10 @@ def test_migration_rejects_result_bound_to_different_experiment(tmp_path: Path) 
     wrong_result = _result(definition).model_copy(
         update={"experiment_id": "aq-exp-111111111111111111111111"}
     )
-    with pytest.raises(ResearchRegistryError, match="research_migration_experiment_identity_mismatch"):
+    with pytest.raises(
+        ResearchRegistryError,
+        match="research_migration_experiment_identity_mismatch",
+    ):
         migrate_canonical_pair_to_research_memory(
             definition=definition,
             result=wrong_result,
