@@ -143,8 +143,8 @@ def test_resampling_evidence_model_rejects_malformed_source_checksum() -> None:
         CanonicalResamplingEvidence.model_validate(payload)
 
 
-def test_resampling_result_adapter_is_research_only() -> None:
-    """Resampling diagnostics can never elevate a strategy into execution authority."""
+def test_resampling_result_adapter_is_research_only_and_preserves_provenance() -> None:
+    """Stored resampling metrics retain their deterministic study provenance."""
 
     evidence = canonical_resampling_evidence(SOURCE_RETURNS, config=_config())
     result = resampling_evidence_to_axiom_result(
@@ -155,4 +155,14 @@ def test_resampling_result_adapter_is_research_only() -> None:
 
     assert result.strategy_state == StrategyResearchState.RESEARCH_ONLY
     assert result.metric_snapshot["resampling_loss_frequency"] == evidence.loss_frequency
+    assert result.metric_snapshot["resampling_source_return_checksum"] == (
+        evidence.source_return_checksum
+    )
+    assert result.metric_snapshot["resampling_method"] == evidence.config.method.value
+    assert result.metric_snapshot["resampling_sample_count"] == evidence.config.sample_count
+    assert result.metric_snapshot["resampling_seed"] == evidence.config.seed
+    assert result.metric_snapshot["resampling_block_size"] == evidence.config.block_size
+    assert result.metric_snapshot["resampling_drawdown_breach_threshold"] == (
+        evidence.config.drawdown_breach_threshold
+    )
     assert "not guaranteed future probabilities" in result.conclusion
