@@ -49,7 +49,7 @@ def test_return_path_robustness_rejects_invalid_inputs() -> None:
         return_path_robustness(())
     with pytest.raises(ValueError, match="finite"):
         return_path_robustness((0.01, float("nan")))
-    with pytest.raises(ValueError, match="below -1.0"):
+    with pytest.raises(ValueError, match=r"below -1\.0"):
         return_path_robustness((-1.01,))
     with pytest.raises(ValueError, match="positive"):
         return_path_robustness((0.01,), annualization_periods=0)
