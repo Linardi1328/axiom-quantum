@@ -7,7 +7,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from spy_market_agent.benchmark.artifacts import sha256_json
-from spy_market_agent.intelligence.contracts import IntelligenceRunIdentity
+from spy_market_agent.intelligence.contracts import (
+    IntelligenceRunIdentity,
+    derive_intelligence_run_identity,
+)
 from spy_market_agent.research.validation_engine import ValidationDecision, ValidationVerdict
 from spy_market_agent.research.validation_memory import validation_decision_identity
 
@@ -121,6 +124,16 @@ def build_intelligence_session(
     canonical_decision = ValidationDecision.model_validate(decision.model_dump(mode="python"))
     if canonical_decision.verdict != ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE:
         raise ValueError("Phase 3 requires a validated_research_candidate decision")
+    canonical_intelligence_run = derive_intelligence_run_identity(
+        target_instrument_id=intelligence_run.target_instrument_id,
+        as_of=intelligence_run.as_of,
+        analysis_profile_id=intelligence_run.analysis_profile_id,
+        snapshot_ids=intelligence_run.snapshot_ids,
+        code_revision=intelligence_run.code_revision,
+        configuration_hash=intelligence_run.configuration_hash,
+    )
+    if intelligence_run != canonical_intelligence_run:
+        raise ValueError("Phase 3 intelligence run identity must match its canonical lineage")
 
     payload: dict[str, object] = {
         "schema_version": INTELLIGENCE_SESSION_SCHEMA_VERSION,
@@ -132,13 +145,13 @@ def build_intelligence_session(
         "result_id": canonical_decision.result_id,
         "validation_policy_id": canonical_decision.policy_id,
         "validation_policy_digest": canonical_decision.policy_digest,
-        "intelligence_run_id": intelligence_run.run_id,
-        "target_instrument_id": intelligence_run.target_instrument_id,
-        "as_of": intelligence_run.as_of,
-        "analysis_profile_id": intelligence_run.analysis_profile_id,
-        "snapshot_ids": intelligence_run.snapshot_ids,
-        "code_revision": intelligence_run.code_revision,
-        "intelligence_configuration_hash": intelligence_run.configuration_hash,
+        "intelligence_run_id": canonical_intelligence_run.run_id,
+        "target_instrument_id": canonical_intelligence_run.target_instrument_id,
+        "as_of": canonical_intelligence_run.as_of,
+        "analysis_profile_id": canonical_intelligence_run.analysis_profile_id,
+        "snapshot_ids": canonical_intelligence_run.snapshot_ids,
+        "code_revision": canonical_intelligence_run.code_revision,
+        "intelligence_configuration_hash": canonical_intelligence_run.configuration_hash,
         "execution_authority": "none",
     }
     identity_payload = payload | {"identity_version": INTELLIGENCE_SESSION_ID_VERSION}
