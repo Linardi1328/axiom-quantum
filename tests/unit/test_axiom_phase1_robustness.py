@@ -133,6 +133,6 @@ def test_robustness_result_remains_research_only() -> None:
     )
 
     assert result.strategy_state is StrategyResearchState.RESEARCH_ONLY
-    assert "no validation" in result.conclusion
+    assert "does not grant validation" in result.conclusion
     assert result.metric_snapshot["robustness.scenario_count"] == 1
     assert "scenario.base.maximum_drawdown" in result.metric_snapshot
