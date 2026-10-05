@@ -210,15 +210,20 @@ def test_canonical_migration_is_idempotent_and_conflicts_fail_closed(tmp_path: P
     registry = _registry(tmp_path)
     definition = _definition(notes="first note")
     result = _result(definition)
-    kwargs = {
-        "definition": definition,
-        "result": result,
-        "source_experiment_id": "legacy-exp-1",
-        "source_record_id": "candidate-a",
-        "registry": registry,
-    }
-    first = migrate_canonical_pair_to_research_memory(**kwargs)
-    second = migrate_canonical_pair_to_research_memory(**kwargs)
+    first = migrate_canonical_pair_to_research_memory(
+        definition=definition,
+        result=result,
+        source_experiment_id="legacy-exp-1",
+        source_record_id="candidate-a",
+        registry=registry,
+    )
+    second = migrate_canonical_pair_to_research_memory(
+        definition=definition,
+        result=result,
+        source_experiment_id="legacy-exp-1",
+        source_record_id="candidate-a",
+        registry=registry,
+    )
 
     assert first == second
     assert first.schema_version == RESEARCH_MIGRATION_RECEIPT_SCHEMA_VERSION
@@ -262,18 +267,28 @@ def test_phase3_migration_preserves_provenance_state_and_reportability(tmp_path:
 
     registry = _registry(tmp_path)
     manifest = _phase3_manifest()
-    kwargs = {
-        "manifest": manifest,
-        "evaluation": _phase3_evaluation(),
-        "selection": _selection(),
-        "name": "Legacy Phase 3 candidate",
-        "hypothesis": "Candidate performance should generalize across approved folds.",
-        "research_question": "Does the candidate retain evidence across Phase-3 folds?",
-        "completed_at": COMPLETED_AT,
-        "registry": registry,
-    }
-    first = migrate_phase3_candidate_to_research_memory(**kwargs)
-    second = migrate_phase3_candidate_to_research_memory(**kwargs)
+    evaluation = _phase3_evaluation()
+    selection = _selection()
+    first = migrate_phase3_candidate_to_research_memory(
+        manifest=manifest,
+        evaluation=evaluation,
+        selection=selection,
+        name="Legacy Phase 3 candidate",
+        hypothesis="Candidate performance should generalize across approved folds.",
+        research_question="Does the candidate retain evidence across Phase-3 folds?",
+        completed_at=COMPLETED_AT,
+        registry=registry,
+    )
+    second = migrate_phase3_candidate_to_research_memory(
+        manifest=manifest,
+        evaluation=evaluation,
+        selection=selection,
+        name="Legacy Phase 3 candidate",
+        hypothesis="Candidate performance should generalize across approved folds.",
+        research_question="Does the candidate retain evidence across Phase-3 folds?",
+        completed_at=COMPLETED_AT,
+        registry=registry,
+    )
     assert first == second
 
     stored_experiment = registry.load_experiment(first.experiment_id)
