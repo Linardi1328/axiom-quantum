@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from spy_market_agent.benchmark.artifacts import sha256_json
 from spy_market_agent.research.experiment_core import (
     ExperimentResult,
     StrategyResearchState,
@@ -20,6 +21,7 @@ from spy_market_agent.research.robustness import (
 from spy_market_agent.research.validation_contract import (
     VALIDATION_REQUIRED_EVIDENCE_STAGES,
     ValidationCase,
+    ValidationEvidenceSourceKind,
     ValidationStage,
 )
 
@@ -195,6 +197,12 @@ class ValidationPolicy(BaseModel):
         return self
 
 
+def validation_policy_digest(policy: ValidationPolicy) -> str:
+    """Return the canonical SHA-256 digest of the exact validation policy contents."""
+
+    return sha256_json(policy.model_dump(mode="json"))
+
+
 class ValidationGateResult(BaseModel):
     """Auditable aggregate outcome for one required validation stage."""
 
@@ -228,6 +236,7 @@ class ValidationDecision(BaseModel):
     experiment_id: str
     result_id: str
     policy_id: str
+    policy_digest: str
     verdict: ValidationVerdict
     gates: tuple[ValidationGateResult, ...]
     execution_authority: Literal["none"] = "none"
@@ -266,6 +275,27 @@ def _robustness_summary(
     return next((item for item in evidence.summaries if item.metric_name == metric_name), None)
 
 
+def _evidence_checksum(evidence: BaseModel) -> str:
+    """Return the canonical checksum used to bind a supplied quantitative evidence object."""
+
+    return sha256_json(evidence.model_dump(mode="json"))
+
+
+def _has_bound_evidence(
+    *,
+    case: ValidationCase,
+    stage: ValidationStage,
+    source_kind: ValidationEvidenceSourceKind,
+    checksum: str,
+) -> bool:
+    """Return whether the case explicitly references this exact evidence at the target stage."""
+
+    return any(
+        item.stage == stage and item.source_kind == source_kind and item.checksum == checksum
+        for item in case.evidence
+    )
+
+
 def evaluate_validation_case(
     *,
     case: ValidationCase,
@@ -276,8 +306,11 @@ def evaluate_validation_case(
 ) -> ValidationDecision:
     """Evaluate every required Phase 2 stage and fail closed on incomplete evidence."""
 
+    digest = validation_policy_digest(policy)
     if case.policy_id != policy.policy_id:
         raise ValueError("validation case policy_id must match the supplied policy")
+    if case.policy_digest != digest:
+        raise ValueError("validation case policy_digest must match the supplied policy contents")
     if source_result.strategy_state != StrategyResearchState.VALIDATION_CANDIDATE:
         raise ValueError("validation source result must remain a validation_candidate")
     if (
@@ -285,6 +318,13 @@ def evaluate_validation_case(
         or result_identity(source_result) != case.result_id
     ):
         raise ValueError("validation source result must match the canonical validation case")
+
+    robustness_checksum = (
+        _evidence_checksum(robustness_evidence) if robustness_evidence is not None else None
+    )
+    resampling_checksum = (
+        _evidence_checksum(resampling_evidence) if resampling_evidence is not None else None
+    )
 
     evidenced_stages = set(case.evidenced_stages)
     gate_results: list[ValidationGateResult] = []
@@ -325,9 +365,20 @@ def evaluate_validation_case(
             item for item in policy.robustness_thresholds if item.stage == stage
         ):
             checks.append(robustness_threshold.gate_id)
-            if robustness_evidence is None:
+            if robustness_evidence is None or robustness_checksum is None:
                 missing_reasons.append(
                     f"robustness evidence required by {robustness_threshold.gate_id} is unavailable"
+                )
+                continue
+            if not _has_bound_evidence(
+                case=case,
+                stage=stage,
+                source_kind=ValidationEvidenceSourceKind.ROBUSTNESS_EVIDENCE,
+                checksum=robustness_checksum,
+            ):
+                missing_reasons.append(
+                    f"robustness evidence required by {robustness_threshold.gate_id} is not "
+                    "checksum-bound to this validation case"
                 )
                 continue
             summary = _robustness_summary(robustness_evidence, robustness_threshold.metric_name)
@@ -379,16 +430,28 @@ def evaluate_validation_case(
             resampling_threshold = policy.resampling_threshold
             if resampling_threshold is not None:
                 checks.append(resampling_threshold.gate_id)
-                if resampling_evidence is None:
+                if resampling_evidence is None or resampling_checksum is None:
                     missing_reasons.append(
                         "resampling evidence required by "
                         f"{resampling_threshold.gate_id} is unavailable"
                     )
+                elif not _has_bound_evidence(
+                    case=case,
+                    stage=stage,
+                    source_kind=ValidationEvidenceSourceKind.RESAMPLING_EVIDENCE,
+                    checksum=resampling_checksum,
+                ):
+                    missing_reasons.append(
+                        "resampling evidence required by "
+                        f"{resampling_threshold.gate_id} is not checksum-bound to this validation case"
+                    )
                 else:
+                    resampling_failed = False
                     if (
                         resampling_evidence.loss_frequency
                         > resampling_threshold.maximum_loss_frequency
                     ):
+                        resampling_failed = True
                         failed_reasons.append(
                             "resampling loss frequency "
                             f"{resampling_evidence.loss_frequency} exceeds "
@@ -398,12 +461,13 @@ def evaluate_validation_case(
                         resampling_evidence.drawdown_breach_frequency
                         > resampling_threshold.maximum_drawdown_breach_frequency
                     ):
+                        resampling_failed = True
                         failed_reasons.append(
                             "resampling drawdown-breach frequency "
                             f"{resampling_evidence.drawdown_breach_frequency} exceeds "
                             f"{resampling_threshold.maximum_drawdown_breach_frequency}"
                         )
-                    if not failed_reasons:
+                    if not resampling_failed:
                         passed_reasons.append(
                             f"resampling threshold {resampling_threshold.gate_id} passed"
                         )
@@ -435,6 +499,7 @@ def evaluate_validation_case(
         experiment_id=case.experiment_id,
         result_id=case.result_id,
         policy_id=case.policy_id,
+        policy_digest=case.policy_digest,
         verdict=_verdict_from_gates(gates),
         gates=gates,
     )
