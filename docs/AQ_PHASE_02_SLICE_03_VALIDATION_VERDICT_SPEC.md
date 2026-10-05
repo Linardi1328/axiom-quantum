@@ -13,9 +13,10 @@ Slice 3 turns a canonical `ValidationCase` into a deterministic research verdict
 The validation engine defines:
 
 - `ValidationPolicy` with explicit metric, robustness, and resampling gates;
+- a canonical SHA-256 policy digest that binds a case and decision to the exact threshold contents;
 - one `ValidationGateResult` for every required Phase 2 evidence stage;
 - `ValidationVerdict` values `validated_research_candidate`, `rejected`, and `insufficient_evidence`;
-- `ValidationDecision`, which is bound to the canonical validation, experiment, result, and policy IDs and fixes `execution_authority` to `none`.
+- `ValidationDecision`, which is bound to the canonical validation, experiment, result, policy ID, and policy digest and fixes `execution_authority` to `none`.
 
 There are no hidden financial defaults. A stage with referenced evidence and no policy threshold passes its structural-evidence check only; a quantitative threshold exists only when the caller explicitly supplies one.
 
@@ -24,16 +25,20 @@ There are no hidden financial defaults. A stage with referenced evidence and no 
 - missing required stage evidence -> `missing` gate status;
 - missing/non-numeric metric required by a policy gate -> `missing`;
 - missing robustness/resampling evidence required by a policy gate -> `missing`;
+- robustness/resampling evidence whose canonical checksum is not referenced by the corresponding validation stage -> `missing`;
+- a reused policy ID whose content digest differs from the case -> evaluation error;
 - an explicit bound violation -> `failed`;
 - any `missing` stage -> `insufficient_evidence`;
 - otherwise any `failed` stage -> `rejected`;
 - only an all-pass gate set -> `validated_research_candidate`.
 
-The source result must still be the exact `validation_candidate` used to build the validation case. Policy, experiment, and result identity mismatches fail closed before evaluation.
+The source result must still be the exact `validation_candidate` used to build the validation case. Policy ID, policy content, experiment, and result identity mismatches fail closed before evaluation.
 
 ## Quantitative Evidence
 
 Metric thresholds read finite numeric values from the canonical source `ExperimentResult`. Robustness thresholds read declared metric summaries from `CanonicalRobustnessEvidence` and may constrain coverage, absolute degradation, and relative degradation. Resampling thresholds read empirical loss and configured drawdown-breach frequencies from `CanonicalResamplingEvidence`.
+
+Supplied robustness and resampling objects are canonicalized and SHA-256 checksummed. A quantitative gate may consume an object only when the validation case contains a `ValidationEvidenceRef` for the same stage, the corresponding evidence source kind, and that exact checksum. Favorable evidence therefore cannot be substituted after a case is assembled.
 
 Resampling frequencies remain empirical research diagnostics and are not represented as guaranteed future probabilities.
 
@@ -54,9 +59,11 @@ A `validated_research_candidate` verdict is a Phase 2 research classification on
 
 - every required Phase 2 evidence stage has exactly one auditable gate outcome;
 - thresholds are explicit and deterministic;
-- missing evidence can never silently pass;
+- the exact policy contents are digest-bound to both case and decision;
+- quantitative evidence is checksum-bound to the stage that consumes it;
+- missing or substituted evidence can never silently pass;
 - complete failed quantitative evidence is rejected;
 - complete all-pass evidence can become `validated_research_candidate`;
-- result/policy identity mismatches fail closed;
-- focused tests cover validated, rejected, and insufficient paths;
+- source/policy identity mismatches fail closed;
+- focused tests cover validated, rejected, insufficient, policy-substitution, and evidence-substitution paths;
 - Ruff, Mypy, pytest/coverage, whitespace, Betterleaks, and CodeRabbit are green before squash merge.
