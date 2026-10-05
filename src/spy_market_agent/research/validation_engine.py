@@ -70,11 +70,7 @@ class MetricThreshold(BaseModel):
         bounds = tuple(value for value in (self.minimum, self.maximum) if value is not None)
         if any(not math.isfinite(value) for value in bounds):
             raise ValueError("metric threshold bounds must be finite")
-        if (
-            self.minimum is not None
-            and self.maximum is not None
-            and self.minimum > self.maximum
-        ):
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("metric threshold minimum cannot exceed maximum")
         return self
 
@@ -368,9 +364,7 @@ def evaluate_validation_case(
                         f"robustness relative degradation {summary.relative_degradation} exceeds "
                         f"{threshold.maximum_relative_degradation}"
                     )
-            if not failed and not any(
-                threshold.gate_id in reason for reason in missing_reasons
-            ):
+            if not failed and not any(threshold.gate_id in reason for reason in missing_reasons):
                 passed_reasons.append(f"robustness threshold {threshold.gate_id} passed")
 
         if stage == ValidationStage.RESAMPLING and policy.resampling_threshold is not None:
