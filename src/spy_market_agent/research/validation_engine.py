@@ -299,98 +299,118 @@ def evaluate_validation_case(
         else:
             passed_reasons.append(f"required evidence stage {stage.value} is present")
 
-        for threshold in (item for item in policy.metric_thresholds if item.stage == stage):
-            checks.append(threshold.gate_id)
-            value = _numeric_metric(source_result, threshold.metric_name)
+        for metric_threshold in (
+            item for item in policy.metric_thresholds if item.stage == stage
+        ):
+            checks.append(metric_threshold.gate_id)
+            value = _numeric_metric(source_result, metric_threshold.metric_name)
             if value is None:
                 missing_reasons.append(
-                    f"metric {threshold.metric_name} required by {threshold.gate_id} "
-                    "is missing or nonnumeric"
+                    f"metric {metric_threshold.metric_name} required by "
+                    f"{metric_threshold.gate_id} is missing or nonnumeric"
                 )
                 continue
-            if threshold.minimum is not None and value < threshold.minimum:
+            if metric_threshold.minimum is not None and value < metric_threshold.minimum:
                 failed_reasons.append(
-                    f"metric {threshold.metric_name}={value} is below minimum {threshold.minimum}"
+                    f"metric {metric_threshold.metric_name}={value} is below minimum "
+                    f"{metric_threshold.minimum}"
                 )
-            elif threshold.maximum is not None and value > threshold.maximum:
+            elif metric_threshold.maximum is not None and value > metric_threshold.maximum:
                 failed_reasons.append(
-                    f"metric {threshold.metric_name}={value} exceeds maximum {threshold.maximum}"
+                    f"metric {metric_threshold.metric_name}={value} exceeds maximum "
+                    f"{metric_threshold.maximum}"
                 )
             else:
-                passed_reasons.append(f"metric threshold {threshold.gate_id} passed")
+                passed_reasons.append(f"metric threshold {metric_threshold.gate_id} passed")
 
-        for threshold in (item for item in policy.robustness_thresholds if item.stage == stage):
-            checks.append(threshold.gate_id)
+        for robustness_threshold in (
+            item for item in policy.robustness_thresholds if item.stage == stage
+        ):
+            checks.append(robustness_threshold.gate_id)
             if robustness_evidence is None:
                 missing_reasons.append(
-                    f"robustness evidence required by {threshold.gate_id} is unavailable"
+                    f"robustness evidence required by {robustness_threshold.gate_id} is unavailable"
                 )
                 continue
-            summary = _robustness_summary(robustness_evidence, threshold.metric_name)
+            summary = _robustness_summary(robustness_evidence, robustness_threshold.metric_name)
             if summary is None:
                 missing_reasons.append(
-                    f"robustness metric {threshold.metric_name} required by "
-                    f"{threshold.gate_id} is unavailable"
+                    f"robustness metric {robustness_threshold.metric_name} required by "
+                    f"{robustness_threshold.gate_id} is unavailable"
                 )
                 continue
             failed = False
             if (
-                threshold.minimum_coverage is not None
-                and summary.coverage_fraction < threshold.minimum_coverage
+                robustness_threshold.minimum_coverage is not None
+                and summary.coverage_fraction < robustness_threshold.minimum_coverage
             ):
                 failed = True
                 failed_reasons.append(
                     f"robustness coverage {summary.coverage_fraction} is below "
-                    f"{threshold.minimum_coverage}"
+                    f"{robustness_threshold.minimum_coverage}"
                 )
             if (
-                threshold.maximum_absolute_degradation is not None
-                and summary.absolute_degradation > threshold.maximum_absolute_degradation
+                robustness_threshold.maximum_absolute_degradation is not None
+                and summary.absolute_degradation
+                > robustness_threshold.maximum_absolute_degradation
             ):
                 failed = True
                 failed_reasons.append(
                     f"robustness absolute degradation {summary.absolute_degradation} exceeds "
-                    f"{threshold.maximum_absolute_degradation}"
+                    f"{robustness_threshold.maximum_absolute_degradation}"
                 )
-            if threshold.maximum_relative_degradation is not None:
+            if robustness_threshold.maximum_relative_degradation is not None:
                 if summary.relative_degradation is None:
                     missing_reasons.append(
                         "robustness relative degradation required by "
-                        f"{threshold.gate_id} is undefined"
+                        f"{robustness_threshold.gate_id} is undefined"
                     )
-                elif summary.relative_degradation > threshold.maximum_relative_degradation:
+                elif (
+                    summary.relative_degradation
+                    > robustness_threshold.maximum_relative_degradation
+                ):
                     failed = True
                     failed_reasons.append(
                         f"robustness relative degradation {summary.relative_degradation} exceeds "
-                        f"{threshold.maximum_relative_degradation}"
+                        f"{robustness_threshold.maximum_relative_degradation}"
                     )
-            if not failed and not any(threshold.gate_id in reason for reason in missing_reasons):
-                passed_reasons.append(f"robustness threshold {threshold.gate_id} passed")
-
-        if stage == ValidationStage.RESAMPLING and policy.resampling_threshold is not None:
-            threshold = policy.resampling_threshold
-            checks.append(threshold.gate_id)
-            if resampling_evidence is None:
-                missing_reasons.append(
-                    f"resampling evidence required by {threshold.gate_id} is unavailable"
+            if not failed and not any(
+                robustness_threshold.gate_id in reason for reason in missing_reasons
+            ):
+                passed_reasons.append(
+                    f"robustness threshold {robustness_threshold.gate_id} passed"
                 )
-            else:
-                if resampling_evidence.loss_frequency > threshold.maximum_loss_frequency:
-                    failed_reasons.append(
-                        f"resampling loss frequency {resampling_evidence.loss_frequency} exceeds "
-                        f"{threshold.maximum_loss_frequency}"
+
+        if stage == ValidationStage.RESAMPLING:
+            resampling_threshold = policy.resampling_threshold
+            if resampling_threshold is not None:
+                checks.append(resampling_threshold.gate_id)
+                if resampling_evidence is None:
+                    missing_reasons.append(
+                        f"resampling evidence required by {resampling_threshold.gate_id} is unavailable"
                     )
-                if (
-                    resampling_evidence.drawdown_breach_frequency
-                    > threshold.maximum_drawdown_breach_frequency
-                ):
-                    failed_reasons.append(
-                        "resampling drawdown-breach frequency "
-                        f"{resampling_evidence.drawdown_breach_frequency} exceeds "
-                        f"{threshold.maximum_drawdown_breach_frequency}"
-                    )
-                if not failed_reasons:
-                    passed_reasons.append(f"resampling threshold {threshold.gate_id} passed")
+                else:
+                    if (
+                        resampling_evidence.loss_frequency
+                        > resampling_threshold.maximum_loss_frequency
+                    ):
+                        failed_reasons.append(
+                            f"resampling loss frequency {resampling_evidence.loss_frequency} exceeds "
+                            f"{resampling_threshold.maximum_loss_frequency}"
+                        )
+                    if (
+                        resampling_evidence.drawdown_breach_frequency
+                        > resampling_threshold.maximum_drawdown_breach_frequency
+                    ):
+                        failed_reasons.append(
+                            "resampling drawdown-breach frequency "
+                            f"{resampling_evidence.drawdown_breach_frequency} exceeds "
+                            f"{resampling_threshold.maximum_drawdown_breach_frequency}"
+                        )
+                    if not failed_reasons:
+                        passed_reasons.append(
+                            f"resampling threshold {resampling_threshold.gate_id} passed"
+                        )
 
         if missing_reasons:
             status = ValidationGateStatus.MISSING
