@@ -362,6 +362,45 @@ def test_report_rejects_decision_not_reconstructed_from_supplied_evidence() -> N
     assert decision.verdict == ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE
 
 
+def test_report_rejects_quantitative_evidence_not_bound_to_case() -> None:
+    """A report cannot attach an unreferenced robustness object even if a verdict is supplied."""
+
+    result, policy, robustness, resampling, case = _inputs()
+    decision = evaluate_validation_case(
+        case=case,
+        source_result=result,
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
+    )
+    unbound = canonical_robustness_evidence(
+        scenarios=(
+            RobustnessScenario(
+                scenario_id="baseline",
+                kind=RobustnessScenarioKind.BASELINE,
+                metrics={"sharpe": 1.2},
+            ),
+            RobustnessScenario(
+                scenario_id="cost-stress",
+                kind=RobustnessScenarioKind.COST,
+                metrics={"sharpe": 0.9},
+            ),
+        ),
+        baseline_scenario_id="baseline",
+        metric_directions={"sharpe": MetricDirection.HIGHER_IS_BETTER},
+    )
+
+    with pytest.raises(ResearchRegistryError, match="validation_report_unbound_evidence"):
+        render_validation_report(
+            case=case,
+            source_result=result,
+            policy=policy,
+            decision=decision,
+            robustness_evidence=unbound,
+            resampling_evidence=resampling,
+        )
+
+
 def test_report_artifact_name_is_decision_content_addressed(tmp_path: Path) -> None:
     """Validation report persistence is tied to the deterministic decision identity."""
 
