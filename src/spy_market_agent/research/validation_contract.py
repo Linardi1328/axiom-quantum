@@ -76,6 +76,8 @@ class ValidationEvidenceRef(BaseModel):
     @field_validator("stage")
     @classmethod
     def _stage(cls, value: ValidationStage) -> ValidationStage:
+        """Reject the decision stage because decisions are Phase 2 outputs, not evidence."""
+
         if value == ValidationStage.CANDIDATE_DECISION:
             raise ValueError("candidate_decision is an output stage, not an evidence stage")
         return value
@@ -83,6 +85,8 @@ class ValidationEvidenceRef(BaseModel):
     @field_validator("evidence_id", "source_id")
     @classmethod
     def _identifiers(cls, value: str) -> str:
+        """Require compact path-safe identifiers for evidence and its source."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("validation evidence identifiers must be path-safe")
         return value
@@ -90,6 +94,8 @@ class ValidationEvidenceRef(BaseModel):
     @field_validator("checksum")
     @classmethod
     def _checksum(cls, value: str) -> str:
+        """Require a canonical lowercase SHA-256 checksum for referenced evidence."""
+
         if not _SHA256.fullmatch(value):
             raise ValueError("validation evidence checksum must be a lowercase SHA-256 digest")
         return value
@@ -98,6 +104,8 @@ class ValidationEvidenceRef(BaseModel):
 def _canonical_evidence(
     value: tuple[ValidationEvidenceRef, ...],
 ) -> tuple[ValidationEvidenceRef, ...]:
+    """Reject duplicate evidence keys and return deterministic validation-stage ordering."""
+
     keys = tuple((item.stage, item.evidence_id) for item in value)
     if len(keys) != len(set(keys)):
         raise ValueError("validation evidence references must be unique per stage and evidence ID")
@@ -130,6 +138,8 @@ class ValidationCase(BaseModel):
     @field_validator("validation_id")
     @classmethod
     def _validation_id(cls, value: str) -> str:
+        """Require a canonical Axiom validation identity."""
+
         if not _VALIDATION_ID.fullmatch(value):
             raise ValueError("validation_id must be a canonical Axiom validation identity")
         return value
@@ -137,6 +147,8 @@ class ValidationCase(BaseModel):
     @field_validator("experiment_id")
     @classmethod
     def _experiment_id(cls, value: str) -> str:
+        """Require the canonical experiment identifier shape used by Phase 1 memory."""
+
         if not value.startswith("aq-exp-") or not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("experiment_id must be a canonical Axiom experiment identity")
         return value
@@ -144,6 +156,8 @@ class ValidationCase(BaseModel):
     @field_validator("result_id")
     @classmethod
     def _result_id(cls, value: str) -> str:
+        """Require the canonical result identifier shape used by Phase 1 memory."""
+
         if not value.startswith("aq-result-") or not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("result_id must be a canonical Axiom result identity")
         return value
@@ -151,6 +165,8 @@ class ValidationCase(BaseModel):
     @field_validator("policy_id")
     @classmethod
     def _policy_id(cls, value: str) -> str:
+        """Require an explicit path-safe identifier for the validation policy."""
+
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("policy_id must be a path-safe identifier")
         return value
@@ -160,10 +176,14 @@ class ValidationCase(BaseModel):
     def _evidence(
         cls, value: tuple[ValidationEvidenceRef, ...]
     ) -> tuple[ValidationEvidenceRef, ...]:
+        """Canonicalize evidence before identity validation and downstream use."""
+
         return _canonical_evidence(value)
 
     @model_validator(mode="after")
     def _identity_matches(self) -> ValidationCase:
+        """Fail closed when serialized case content does not match its content identity."""
+
         if self.schema_version != VALIDATION_CASE_SCHEMA_VERSION:
             raise ValueError("unsupported validation case schema version")
         if self.validation_id != validation_case_identity(self):
