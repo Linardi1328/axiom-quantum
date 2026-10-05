@@ -18,6 +18,7 @@ from spy_market_agent.research.resampling import (
     ResamplingMethod,
 )
 from spy_market_agent.research.robustness import (
+    CanonicalRobustnessEvidence,
     MetricDirection,
     RobustnessScenario,
     RobustnessScenarioKind,
@@ -25,6 +26,7 @@ from spy_market_agent.research.robustness import (
 )
 from spy_market_agent.research.validation_contract import (
     VALIDATION_REQUIRED_EVIDENCE_STAGES,
+    ValidationCase,
     ValidationEvidenceRef,
     ValidationEvidenceSourceKind,
     ValidationStage,
@@ -73,7 +75,7 @@ def _evidence_refs(*, omit: ValidationStage | None = None) -> tuple[ValidationEv
     return tuple(refs)
 
 
-def _robustness_evidence():
+def _robustness_evidence() -> CanonicalRobustnessEvidence:
     return canonical_robustness_evidence(
         scenarios=(
             RobustnessScenario(
@@ -154,7 +156,7 @@ def _policy(
     )
 
 
-def _case(result: ExperimentResult, *, omit: ValidationStage | None = None):
+def _case(result: ExperimentResult, *, omit: ValidationStage | None = None) -> ValidationCase:
     return build_validation_case(
         result=result,
         policy_id="validation-policy-v1",
