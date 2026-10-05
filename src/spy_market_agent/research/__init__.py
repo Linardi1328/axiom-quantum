@@ -163,6 +163,17 @@ from spy_market_agent.research.thresholds import (
     diagnostic_threshold_policy,
     strategy_threshold_policy,
 )
+from spy_market_agent.research.validation_contract import (
+    VALIDATION_CASE_ID_VERSION,
+    VALIDATION_CASE_SCHEMA_VERSION,
+    VALIDATION_REQUIRED_EVIDENCE_STAGES,
+    ValidationCase,
+    ValidationEvidenceRef,
+    ValidationEvidenceSourceKind,
+    ValidationStage,
+    build_validation_case,
+    validation_case_identity,
+)
 
 __all__ = [
     "AXIOM_EXPERIMENT_ID_VERSION",
@@ -204,6 +215,9 @@ __all__ = [
     "RESEARCH_REPORT_PREFIX",
     "RESEARCH_REPORT_SCHEMA_VERSION",
     "ROBUSTNESS_EVIDENCE_SCHEMA_VERSION",
+    "VALIDATION_CASE_ID_VERSION",
+    "VALIDATION_CASE_SCHEMA_VERSION",
+    "VALIDATION_REQUIRED_EVIDENCE_STAGES",
     "WALK_FORWARD_FOLD_POLICY_ID",
     "CanonicalBacktestEvidence",
     "CanonicalRobustnessEvidence",
@@ -240,6 +254,10 @@ __all__ = [
     "StoredExperimentResult",
     "StrategyResearchState",
     "TransformationFitRecord",
+    "ValidationCase",
+    "ValidationEvidenceRef",
+    "ValidationEvidenceSourceKind",
+    "ValidationStage",
     "ablation_scaffold",
     "aggregate_metric",
     "assert_protected_evaluation_not_accessed",
@@ -251,6 +269,7 @@ __all__ = [
     "build_calibration_split",
     "build_experiment_manifest",
     "build_spy_scenario_label_set",
+    "build_validation_case",
     "calculate_research_classification_metrics",
     "calculate_scenario_probability_metrics",
     "campaign_config_identity",
@@ -288,5 +307,6 @@ __all__ = [
     "validate_phase2_final_test_isolation",
     "validate_supervised_leakage_contract",
     "validate_training_only_fit_scope",
+    "validation_case_identity",
     "write_research_report",
 ]
