@@ -32,12 +32,14 @@ class IntelligenceSession(BaseModel):
     invocation_id: str
     invocation_source: Literal["human_requested"] = "human_requested"
     decision_id: str
+    decision: ValidationDecision
     validation_id: str
     experiment_id: str
     result_id: str
     validation_policy_id: str
     validation_policy_digest: str
     intelligence_run_id: str
+    intelligence_run: IntelligenceRunIdentity
     target_instrument_id: str
     as_of: datetime
     analysis_profile_id: str
@@ -108,10 +110,45 @@ class IntelligenceSession(BaseModel):
 
     @model_validator(mode="after")
     def _identity_matches(self) -> IntelligenceSession:
-        """Fail closed when stored identity differs from canonical session content."""
+        """Enforce admission, exact lineage, and content identity at the public boundary."""
 
         if self.schema_version != INTELLIGENCE_SESSION_SCHEMA_VERSION:
             raise ValueError("unsupported Intelligence OS session schema version")
+        canonical_decision = ValidationDecision.model_validate(
+            self.decision.model_dump(mode="python")
+        )
+        if canonical_decision.verdict != ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE:
+            raise ValueError("Phase 3 requires a validated_research_candidate decision")
+        if self.decision_id != validation_decision_identity(canonical_decision):
+            raise ValueError("Phase 3 decision_id must match the embedded validation decision")
+        if (
+            self.validation_id != canonical_decision.validation_id
+            or self.experiment_id != canonical_decision.experiment_id
+            or self.result_id != canonical_decision.result_id
+            or self.validation_policy_id != canonical_decision.policy_id
+            or self.validation_policy_digest != canonical_decision.policy_digest
+        ):
+            raise ValueError("Phase 3 validation lineage must match the embedded decision")
+        canonical_run = derive_intelligence_run_identity(
+            target_instrument_id=self.intelligence_run.target_instrument_id,
+            as_of=self.intelligence_run.as_of,
+            analysis_profile_id=self.intelligence_run.analysis_profile_id,
+            snapshot_ids=self.intelligence_run.snapshot_ids,
+            code_revision=self.intelligence_run.code_revision,
+            configuration_hash=self.intelligence_run.configuration_hash,
+        )
+        if self.intelligence_run != canonical_run:
+            raise ValueError("Phase 3 intelligence run identity must match its canonical lineage")
+        if (
+            self.intelligence_run_id != canonical_run.run_id
+            or self.target_instrument_id != canonical_run.target_instrument_id
+            or self.as_of != canonical_run.as_of
+            or self.analysis_profile_id != canonical_run.analysis_profile_id
+            or self.snapshot_ids != canonical_run.snapshot_ids
+            or self.code_revision != canonical_run.code_revision
+            or self.intelligence_configuration_hash != canonical_run.configuration_hash
+        ):
+            raise ValueError("Phase 3 intelligence lineage must match the embedded run")
         if self.session_id != intelligence_session_identity(self):
             raise ValueError("session_id must match canonical Intelligence OS session content")
         return self
@@ -152,12 +189,14 @@ def build_intelligence_session(
         "invocation_id": invocation_id,
         "invocation_source": "human_requested",
         "decision_id": validation_decision_identity(canonical_decision),
+        "decision": canonical_decision,
         "validation_id": canonical_decision.validation_id,
         "experiment_id": canonical_decision.experiment_id,
         "result_id": canonical_decision.result_id,
         "validation_policy_id": canonical_decision.policy_id,
         "validation_policy_digest": canonical_decision.policy_digest,
         "intelligence_run_id": canonical_intelligence_run.run_id,
+        "intelligence_run": canonical_intelligence_run,
         "target_instrument_id": canonical_intelligence_run.target_instrument_id,
         "as_of": canonical_intelligence_run.as_of,
         "analysis_profile_id": canonical_intelligence_run.analysis_profile_id,
