@@ -131,6 +131,7 @@ class ValidationCase(BaseModel):
     experiment_id: str
     result_id: str
     policy_id: str
+    policy_digest: str
     source_strategy_state: Literal["validation_candidate"] = "validation_candidate"
     evidence: tuple[ValidationEvidenceRef, ...] = ()
     execution_authority: Literal["none"] = "none"
@@ -169,6 +170,15 @@ class ValidationCase(BaseModel):
 
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise ValueError("policy_id must be a path-safe identifier")
+        return value
+
+    @field_validator("policy_digest")
+    @classmethod
+    def _policy_digest(cls, value: str) -> str:
+        """Require a canonical content digest for the exact validation policy."""
+
+        if not _SHA256.fullmatch(value):
+            raise ValueError("policy_digest must be a lowercase SHA-256 digest")
         return value
 
     @field_validator("evidence")
@@ -222,18 +232,22 @@ def build_validation_case(
     *,
     result: ExperimentResult,
     policy_id: str,
+    policy_digest: str,
     evidence: tuple[ValidationEvidenceRef, ...] = (),
 ) -> ValidationCase:
     """Build a canonical validation case from a completed validation-candidate result."""
 
     if result.strategy_state != StrategyResearchState.VALIDATION_CANDIDATE:
         raise ValueError("Phase 2 validation requires a validation_candidate research result")
+    if not _SHA256.fullmatch(policy_digest):
+        raise ValueError("policy_digest must be a lowercase SHA-256 digest")
     canonical_evidence = _canonical_evidence(evidence)
     payload: dict[str, object] = {
         "schema_version": VALIDATION_CASE_SCHEMA_VERSION,
         "experiment_id": result.experiment_id,
         "result_id": result_identity(result),
         "policy_id": policy_id,
+        "policy_digest": policy_digest,
         "source_strategy_state": "validation_candidate",
         "evidence": tuple(item.model_dump(mode="python") for item in canonical_evidence),
         "execution_authority": "none",
@@ -245,5 +259,6 @@ def build_validation_case(
         experiment_id=result.experiment_id,
         result_id=result_identity(result),
         policy_id=policy_id,
+        policy_digest=policy_digest,
         evidence=canonical_evidence,
     )
