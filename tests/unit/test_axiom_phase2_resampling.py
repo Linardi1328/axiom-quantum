@@ -86,18 +86,21 @@ def test_resampling_distributions_and_frequencies_are_internally_consistent() ->
 
 
 @pytest.mark.parametrize(
-    "returns",
+    ("returns", "message"),
     [
-        (0.01,),
-        (0.01, float("nan")),
-        (0.01, float("inf")),
-        (0.01, -1.01),
+        ((0.01,), "at least two"),
+        ((0.01, float("nan")), "finite"),
+        ((0.01, float("inf")), "finite"),
+        ((0.01, -1.01), "below -100%"),
     ],
 )
-def test_resampling_rejects_invalid_source_returns(returns: tuple[float, ...]) -> None:
+def test_resampling_rejects_invalid_source_returns(
+    returns: tuple[float, ...],
+    message: str,
+) -> None:
     """Short, non-finite, or impossible simple-return paths fail closed."""
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         canonical_resampling_evidence(returns, config=_config())
 
 
@@ -144,7 +147,7 @@ def test_resampling_result_adapter_is_research_only() -> None:
     """Resampling diagnostics can never elevate a strategy into execution authority."""
 
     evidence = canonical_resampling_evidence(SOURCE_RETURNS, config=_config())
-    result = resampling_evidence_to_axiom_result(
+    result = resampling_evidence_to_axi_result(
         experiment_id="aq-exp-111111111111111111111111",
         evidence=evidence,
         completed_at=COMPLETED_AT,
