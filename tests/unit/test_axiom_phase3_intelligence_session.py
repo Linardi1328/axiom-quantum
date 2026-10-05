@@ -28,6 +28,8 @@ AS_OF = datetime(2026, 10, 5, 20, 0, tzinfo=UTC)
 
 def _decision(
     verdict: ValidationVerdict = ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE,
+    *,
+    gate_reason: str = "evidence passed",
 ) -> ValidationDecision:
     status = (
         ValidationGateStatus.PASSED
@@ -39,7 +41,7 @@ def _decision(
             stage=stage,
             status=status,
             check_ids=(f"structural:{stage.value}",),
-            reasons=("evidence passed",) if status == ValidationGateStatus.PASSED else ("failed",),
+            reasons=(gate_reason,) if status == ValidationGateStatus.PASSED else ("failed",),
         )
         for stage in VALIDATION_REQUIRED_EVIDENCE_STAGES
     )
@@ -104,6 +106,11 @@ def test_session_identity_changes_with_validation_intelligence_or_invocation_lin
         intelligence_run=_intelligence_run(),
         invocation_id="owner-session-002",
     )
+    changed_validation = build_intelligence_session(
+        decision=_decision(gate_reason="updated evidence"),
+        intelligence_run=_intelligence_run(),
+        invocation_id="owner-session-001",
+    )
     changed_run = build_intelligence_session(
         decision=_decision(),
         intelligence_run=derive_intelligence_run_identity(
@@ -118,7 +125,29 @@ def test_session_identity_changes_with_validation_intelligence_or_invocation_lin
     )
 
     assert baseline.session_id != changed_invocation.session_id
+    assert baseline.decision_id != changed_validation.decision_id
+    assert baseline.session_id != changed_validation.session_id
     assert baseline.session_id != changed_run.session_id
+
+
+def test_session_rejects_intelligence_run_id_that_does_not_match_lineage() -> None:
+    canonical = _intelligence_run()
+    forged = IntelligenceRunIdentity(
+        run_id="mi0-run-forged",
+        target_instrument_id=canonical.target_instrument_id,
+        as_of=canonical.as_of,
+        analysis_profile_id=canonical.analysis_profile_id,
+        snapshot_ids=canonical.snapshot_ids,
+        code_revision=canonical.code_revision,
+        configuration_hash=canonical.configuration_hash,
+    )
+
+    with pytest.raises(ValueError, match="must match its canonical lineage"):
+        build_intelligence_session(
+            decision=_decision(),
+            intelligence_run=forged,
+            invocation_id="owner-session-001",
+        )
 
 
 @pytest.mark.parametrize(
