@@ -31,6 +31,8 @@ def _decision(
     *,
     gate_reason: str = "evidence passed",
 ) -> ValidationDecision:
+    """Build a compact canonical Phase 2 decision fixture."""
+
     status = (
         ValidationGateStatus.PASSED
         if verdict == ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE
@@ -59,6 +61,8 @@ def _decision(
 def _intelligence_run(
     *, snapshot_ids: tuple[str, ...] = ("mi0-snapshot-a", "mi0-snapshot-b")
 ) -> IntelligenceRunIdentity:
+    """Build one canonical point-in-time Market Intelligence run fixture."""
+
     return derive_intelligence_run_identity(
         target_instrument_id="spy-us-equity-etf",
         as_of=AS_OF,
@@ -70,6 +74,8 @@ def _intelligence_run(
 
 
 def test_session_binds_exact_validation_and_intelligence_lineage_deterministically() -> None:
+    """Equivalent inputs retain exact lineage and produce one session identity."""
+
     decision = _decision()
     intelligence_run = _intelligence_run()
 
@@ -96,6 +102,8 @@ def test_session_binds_exact_validation_and_intelligence_lineage_deterministical
 
 
 def test_session_identity_changes_with_validation_intelligence_or_invocation_lineage() -> None:
+    """Every safety-relevant Phase 2, intelligence, and invocation change alters identity."""
+
     baseline = build_intelligence_session(
         decision=_decision(),
         intelligence_run=_intelligence_run(),
@@ -131,6 +139,8 @@ def test_session_identity_changes_with_validation_intelligence_or_invocation_lin
 
 
 def test_session_rejects_intelligence_run_id_that_does_not_match_lineage() -> None:
+    """A forged run ID cannot be attached to otherwise-valid intelligence lineage."""
+
     canonical = _intelligence_run()
     forged = IntelligenceRunIdentity(
         run_id="mi0-run-forged",
@@ -157,6 +167,8 @@ def test_session_rejects_intelligence_run_id_that_does_not_match_lineage() -> No
 def test_phase3_admission_rejects_non_validated_phase2_decisions(
     verdict: ValidationVerdict,
 ) -> None:
+    """Rejected and incomplete Phase 2 decisions cannot enter Intelligence OS."""
+
     if verdict == ValidationVerdict.INSUFFICIENT_EVIDENCE:
         gates = tuple(
             ValidationGateResult(
@@ -188,6 +200,8 @@ def test_phase3_admission_rejects_non_validated_phase2_decisions(
 
 
 def test_session_rejects_tampered_identity() -> None:
+    """Stored session identity must remain content-addressed to canonical session fields."""
+
     session = build_intelligence_session(
         decision=_decision(),
         intelligence_run=_intelligence_run(),
@@ -213,6 +227,8 @@ def test_session_refuses_autonomy_execution_and_unsafe_invocation(
     value: str,
     message: str,
 ) -> None:
+    """Autonomous invocation, execution authority, and unsafe identifiers fail closed."""
+
     session = build_intelligence_session(
         decision=_decision(),
         intelligence_run=_intelligence_run(),
@@ -226,6 +242,8 @@ def test_session_refuses_autonomy_execution_and_unsafe_invocation(
 
 
 def test_phase3_spec_and_intelligence_package_retain_non_execution_boundary() -> None:
+    """Phase 3 stays human-invoked and isolated from execution-capable packages."""
+
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
