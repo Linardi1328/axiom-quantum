@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from spy_market_agent.benchmark.artifacts import sha256_json
 from spy_market_agent.research.experiment_core import (
     ExperimentLifecycleState,
     ExperimentOutcome,
@@ -40,6 +41,7 @@ from spy_market_agent.research.validation_engine import (
     ValidationPolicy,
     ValidationVerdict,
     evaluate_validation_case,
+    validation_policy_digest,
 )
 
 COMPLETED_AT = datetime(2026, 10, 5, 14, 0, tzinfo=UTC)
@@ -56,23 +58,6 @@ def _candidate_result(*, sharpe: float = 1.2) -> ExperimentResult:
         metric_snapshot={"sharpe": sharpe},
         completed_at=COMPLETED_AT,
     )
-
-
-def _evidence_refs(*, omit: ValidationStage | None = None) -> tuple[ValidationEvidenceRef, ...]:
-    refs = []
-    for index, stage in enumerate(VALIDATION_REQUIRED_EVIDENCE_STAGES):
-        if stage == omit:
-            continue
-        refs.append(
-            ValidationEvidenceRef(
-                stage=stage,
-                source_kind=ValidationEvidenceSourceKind.OTHER,
-                evidence_id=f"evidence-{index}",
-                source_id=f"source-{index}",
-                checksum=f"{index + 1:064x}",
-            )
-        )
-    return tuple(refs)
 
 
 def _robustness_evidence() -> CanonicalRobustnessEvidence:
@@ -123,6 +108,39 @@ def _resampling_evidence() -> CanonicalResamplingEvidence:
     )
 
 
+def _evidence_refs(
+    *,
+    robustness: CanonicalRobustnessEvidence,
+    resampling: CanonicalResamplingEvidence,
+    omit: ValidationStage | None = None,
+    bind_quantitative: bool = True,
+) -> tuple[ValidationEvidenceRef, ...]:
+    refs = []
+    robustness_checksum = sha256_json(robustness.model_dump(mode="json"))
+    resampling_checksum = sha256_json(resampling.model_dump(mode="json"))
+    for index, stage in enumerate(VALIDATION_REQUIRED_EVIDENCE_STAGES):
+        if stage == omit:
+            continue
+        source_kind = ValidationEvidenceSourceKind.OTHER
+        checksum = f"{index + 1:064x}"
+        if bind_quantitative and stage == ValidationStage.COST_STRESS:
+            source_kind = ValidationEvidenceSourceKind.ROBUSTNESS_EVIDENCE
+            checksum = robustness_checksum
+        elif bind_quantitative and stage == ValidationStage.RESAMPLING:
+            source_kind = ValidationEvidenceSourceKind.RESAMPLING_EVIDENCE
+            checksum = resampling_checksum
+        refs.append(
+            ValidationEvidenceRef(
+                stage=stage,
+                source_kind=source_kind,
+                evidence_id=f"evidence-{index}",
+                source_id=f"source-{index}",
+                checksum=checksum,
+            )
+        )
+    return tuple(refs)
+
+
 def _policy(
     *,
     minimum_sharpe: float = 1.0,
@@ -156,38 +174,73 @@ def _policy(
     )
 
 
-def _case(result: ExperimentResult, *, omit: ValidationStage | None = None) -> ValidationCase:
+def _case(
+    result: ExperimentResult,
+    *,
+    policy: ValidationPolicy,
+    robustness: CanonicalRobustnessEvidence,
+    resampling: CanonicalResamplingEvidence,
+    omit: ValidationStage | None = None,
+    bind_quantitative: bool = True,
+) -> ValidationCase:
     return build_validation_case(
         result=result,
-        policy_id="validation-policy-v1",
-        evidence=_evidence_refs(omit=omit),
+        policy_id=policy.policy_id,
+        policy_digest=validation_policy_digest(policy),
+        evidence=_evidence_refs(
+            robustness=robustness,
+            resampling=resampling,
+            omit=omit,
+            bind_quantitative=bind_quantitative,
+        ),
     )
+
+
+def _inputs() -> tuple[
+    ExperimentResult,
+    ValidationPolicy,
+    CanonicalRobustnessEvidence,
+    CanonicalResamplingEvidence,
+]:
+    return _candidate_result(), _policy(), _robustness_evidence(), _resampling_evidence()
 
 
 def test_all_required_stages_pass_to_validated_research_candidate() -> None:
-    result = _candidate_result()
+    result, policy, robustness, resampling = _inputs()
     decision = evaluate_validation_case(
-        case=_case(result),
+        case=_case(
+            result,
+            policy=policy,
+            robustness=robustness,
+            resampling=resampling,
+        ),
         source_result=result,
-        policy=_policy(),
-        robustness_evidence=_robustness_evidence(),
-        resampling_evidence=_resampling_evidence(),
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
     )
 
     assert decision.verdict == ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE
+    assert decision.policy_digest == validation_policy_digest(policy)
     assert decision.execution_authority == "none"
     assert tuple(gate.stage for gate in decision.gates) == VALIDATION_REQUIRED_EVIDENCE_STAGES
     assert all(gate.status == ValidationGateStatus.PASSED for gate in decision.gates)
 
 
 def test_missing_required_stage_is_insufficient_evidence() -> None:
-    result = _candidate_result()
+    result, policy, robustness, resampling = _inputs()
     decision = evaluate_validation_case(
-        case=_case(result, omit=ValidationStage.RISK),
+        case=_case(
+            result,
+            policy=policy,
+            robustness=robustness,
+            resampling=resampling,
+            omit=ValidationStage.RISK,
+        ),
         source_result=result,
-        policy=_policy(),
-        robustness_evidence=_robustness_evidence(),
-        resampling_evidence=_resampling_evidence(),
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
     )
 
     assert decision.verdict == ValidationVerdict.INSUFFICIENT_EVIDENCE
@@ -197,12 +250,20 @@ def test_missing_required_stage_is_insufficient_evidence() -> None:
 
 def test_metric_threshold_failure_rejects_complete_case() -> None:
     result = _candidate_result()
+    policy = _policy(minimum_sharpe=2.0)
+    robustness = _robustness_evidence()
+    resampling = _resampling_evidence()
     decision = evaluate_validation_case(
-        case=_case(result),
+        case=_case(
+            result,
+            policy=policy,
+            robustness=robustness,
+            resampling=resampling,
+        ),
         source_result=result,
-        policy=_policy(minimum_sharpe=2.0),
-        robustness_evidence=_robustness_evidence(),
-        resampling_evidence=_resampling_evidence(),
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
     )
 
     assert decision.verdict == ValidationVerdict.REJECTED
@@ -212,12 +273,20 @@ def test_metric_threshold_failure_rejects_complete_case() -> None:
 
 def test_robustness_threshold_failure_rejects_complete_case() -> None:
     result = _candidate_result()
+    policy = _policy(max_degradation=0.10)
+    robustness = _robustness_evidence()
+    resampling = _resampling_evidence()
     decision = evaluate_validation_case(
-        case=_case(result),
+        case=_case(
+            result,
+            policy=policy,
+            robustness=robustness,
+            resampling=resampling,
+        ),
         source_result=result,
-        policy=_policy(max_degradation=0.10),
-        robustness_evidence=_robustness_evidence(),
-        resampling_evidence=_resampling_evidence(),
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
     )
 
     assert decision.verdict == ValidationVerdict.REJECTED
@@ -227,12 +296,20 @@ def test_robustness_threshold_failure_rejects_complete_case() -> None:
 
 def test_resampling_threshold_failure_rejects_complete_case() -> None:
     result = _candidate_result()
+    policy = _policy(max_loss_frequency=0.05)
+    robustness = _robustness_evidence()
+    resampling = _resampling_evidence()
     decision = evaluate_validation_case(
-        case=_case(result),
+        case=_case(
+            result,
+            policy=policy,
+            robustness=robustness,
+            resampling=resampling,
+        ),
         source_result=result,
-        policy=_policy(max_loss_frequency=0.05),
-        robustness_evidence=_robustness_evidence(),
-        resampling_evidence=_resampling_evidence(),
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
     )
 
     assert decision.verdict == ValidationVerdict.REJECTED
@@ -241,11 +318,16 @@ def test_resampling_threshold_failure_rejects_complete_case() -> None:
 
 
 def test_missing_quantitative_evidence_never_silently_passes() -> None:
-    result = _candidate_result()
+    result, policy, robustness, resampling = _inputs()
     decision = evaluate_validation_case(
-        case=_case(result),
+        case=_case(
+            result,
+            policy=policy,
+            robustness=robustness,
+            resampling=resampling,
+        ),
         source_result=result,
-        policy=_policy(),
+        policy=policy,
         robustness_evidence=None,
         resampling_evidence=None,
     )
@@ -256,16 +338,93 @@ def test_missing_quantitative_evidence_never_silently_passes() -> None:
     assert statuses[ValidationStage.RESAMPLING] == ValidationGateStatus.MISSING
 
 
+def test_same_policy_id_with_different_thresholds_fails_closed() -> None:
+    result, policy, robustness, resampling = _inputs()
+    case = _case(
+        result,
+        policy=policy,
+        robustness=robustness,
+        resampling=resampling,
+    )
+    weaker_policy = _policy(minimum_sharpe=0.1)
+    assert weaker_policy.policy_id == policy.policy_id
+    assert validation_policy_digest(weaker_policy) != case.policy_digest
+
+    with pytest.raises(ValueError, match="policy_digest"):
+        evaluate_validation_case(
+            case=case,
+            source_result=result,
+            policy=weaker_policy,
+            robustness_evidence=robustness,
+            resampling_evidence=resampling,
+        )
+
+
+def test_unreferenced_quantitative_evidence_is_insufficient() -> None:
+    result, policy, robustness, resampling = _inputs()
+    case = _case(
+        result,
+        policy=policy,
+        robustness=robustness,
+        resampling=resampling,
+        bind_quantitative=False,
+    )
+    decision = evaluate_validation_case(
+        case=case,
+        source_result=result,
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=resampling,
+    )
+
+    assert decision.verdict == ValidationVerdict.INSUFFICIENT_EVIDENCE
+    statuses = {gate.stage: gate.status for gate in decision.gates}
+    assert statuses[ValidationStage.COST_STRESS] == ValidationGateStatus.MISSING
+    assert statuses[ValidationStage.RESAMPLING] == ValidationGateStatus.MISSING
+
+
+def test_checksum_substitution_of_favorable_evidence_is_insufficient() -> None:
+    result, policy, robustness, resampling = _inputs()
+    case = _case(
+        result,
+        policy=policy,
+        robustness=robustness,
+        resampling=resampling,
+    )
+    favorable_resampling = resampling.model_copy(
+        update={"loss_frequency": 0.0, "drawdown_breach_frequency": 0.0}
+    )
+    assert sha256_json(favorable_resampling.model_dump(mode="json")) != sha256_json(
+        resampling.model_dump(mode="json")
+    )
+
+    decision = evaluate_validation_case(
+        case=case,
+        source_result=result,
+        policy=policy,
+        robustness_evidence=robustness,
+        resampling_evidence=favorable_resampling,
+    )
+    assert decision.verdict == ValidationVerdict.INSUFFICIENT_EVIDENCE
+    gate = next(gate for gate in decision.gates if gate.stage == ValidationStage.RESAMPLING)
+    assert gate.status == ValidationGateStatus.MISSING
+
+
 def test_case_policy_and_source_identity_mismatches_fail_closed() -> None:
-    result = _candidate_result()
-    case = _case(result)
-    wrong_policy = _policy().model_copy(update={"policy_id": "another-policy"})
+    result, policy, robustness, resampling = _inputs()
+    case = _case(
+        result,
+        policy=policy,
+        robustness=robustness,
+        resampling=resampling,
+    )
+    wrong_policy = policy.model_copy(update={"policy_id": "another-policy"})
     with pytest.raises(ValueError, match="policy_id"):
         evaluate_validation_case(case=case, source_result=result, policy=wrong_policy)
 
     wrong_result = result.model_copy(update={"metric_snapshot": {"sharpe": 1.3}})
     with pytest.raises(ValueError, match="canonical validation case"):
-        evaluate_validation_case(case=case, source_result=wrong_result, policy=_policy())
+        evaluate_validation_case(case=case, source_result=wrong_result, policy=policy)
 
 
 def test_threshold_contracts_reject_hidden_or_invalid_bounds() -> None:
