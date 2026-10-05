@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -101,7 +102,7 @@ def test_zero_baseline_omits_relative_degradation() -> None:
 
 
 def test_robustness_evidence_fails_closed_on_invalid_inputs() -> None:
-    """Duplicate, undeclared, non-finite, and invalid baseline inputs are rejected."""
+    """Duplicate, undeclared, non-finite, baseline, and direction errors are rejected."""
 
     baseline = _scenario("baseline", RobustnessScenarioKind.BASELINE, score=1.0)
     duplicate = _scenario("baseline", RobustnessScenarioKind.COST, score=0.9)
@@ -121,11 +122,26 @@ def test_robustness_evidence_fails_closed_on_invalid_inputs() -> None:
         )
 
     not_baseline = _scenario("control", RobustnessScenarioKind.OTHER, score=1.0)
-    with pytest.raises(ValueError, match="kind=baseline"):
+    with pytest.raises(ValueError, match="exactly one baseline"):
         canonical_robustness_evidence(
-            scenarios=(not_baseline, extra.model_copy(update={"metrics": {"score": 0.9}})),
+            scenarios=(not_baseline, _scenario("stress", RobustnessScenarioKind.OTHER, score=0.9)),
             baseline_scenario_id="control",
             metric_directions={"score": MetricDirection.HIGHER_IS_BETTER},
+        )
+
+    second_baseline = _scenario("baseline-2", RobustnessScenarioKind.BASELINE, score=0.9)
+    with pytest.raises(ValueError, match="exactly one baseline"):
+        canonical_robustness_evidence(
+            scenarios=(baseline, second_baseline),
+            baseline_scenario_id="baseline",
+            metric_directions={"score": MetricDirection.HIGHER_IS_BETTER},
+        )
+
+    with pytest.raises(ValueError, match="MetricDirection"):
+        canonical_robustness_evidence(
+            scenarios=(baseline, _scenario("stress", RobustnessScenarioKind.OTHER, score=0.9)),
+            baseline_scenario_id="baseline",
+            metric_directions={"score": cast(MetricDirection, "sideways")},
         )
 
     with pytest.raises(ValidationError, match="finite"):
