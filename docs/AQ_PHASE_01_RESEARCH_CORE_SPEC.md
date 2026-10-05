@@ -1,6 +1,6 @@
 # Axiom Quantum Phase 1 - Research Core Foundation Specification
 
-Status: Active - first implementation slice
+Status: Completion candidate - all implementation slices complete pending final Slice 6 gates
 
 Linear issue: `RIC-7`
 
@@ -198,5 +198,7 @@ contract, formalize richer performance/robustness metrics, generate reproducible
 and migrate selected existing research outputs into the new memory format without rewriting their
 historical evidence.
 
-Those follow-on slices remain research-only until separate roadmap gates explicitly authorize a
-higher environment.
+Those follow-on slices are now implemented through `RIC-9`, `RIC-20`, `RIC-21`, `RIC-22`, and
+`RIC-23`. Their completion contract and end-to-end gates are recorded in
+`docs/AQ_PHASE_01_COMPLETION_SPEC.md`. All Phase 1 outputs remain research-only until a separate
+roadmap gate explicitly authorizes a higher environment.
