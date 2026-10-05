@@ -22,6 +22,7 @@ from spy_market_agent.research.validation_contract import (
 )
 
 COMPLETED_AT = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+POLICY_DIGEST = "f" * 64
 
 
 def _candidate_result(
@@ -68,11 +69,13 @@ def test_validation_case_identity_is_order_independent_and_tracks_missing_stages
     first = build_validation_case(
         result=result,
         policy_id="phase2-policy-v1",
+        policy_digest=POLICY_DIGEST,
         evidence=(backtest, hypothesis),
     )
     second = build_validation_case(
         result=result,
         policy_id="phase2-policy-v1",
+        policy_digest=POLICY_DIGEST,
         evidence=(hypothesis, backtest),
     )
 
@@ -84,22 +87,31 @@ def test_validation_case_identity_is_order_independent_and_tracks_missing_stages
     assert first.execution_authority == "none"
 
 
-def test_validation_case_identity_changes_with_scientific_evidence() -> None:
-    """Changing the evidence manifest changes the content-addressed validation identity."""
+def test_validation_case_identity_changes_with_scientific_evidence_or_policy_digest() -> None:
+    """Changing evidence or policy contents changes the validation case content identity."""
 
     result = _candidate_result()
     baseline = build_validation_case(
         result=result,
         policy_id="phase2-policy-v1",
+        policy_digest=POLICY_DIGEST,
         evidence=(_evidence(ValidationStage.HYPOTHESIS, suffix="a"),),
     )
-    changed = build_validation_case(
+    changed_evidence = build_validation_case(
         result=result,
         policy_id="phase2-policy-v1",
+        policy_digest=POLICY_DIGEST,
         evidence=(_evidence(ValidationStage.HYPOTHESIS, suffix="b"),),
     )
+    changed_policy = build_validation_case(
+        result=result,
+        policy_id="phase2-policy-v1",
+        policy_digest="e" * 64,
+        evidence=(_evidence(ValidationStage.HYPOTHESIS, suffix="a"),),
+    )
 
-    assert baseline.validation_id != changed.validation_id
+    assert baseline.validation_id != changed_evidence.validation_id
+    assert baseline.validation_id != changed_policy.validation_id
 
 
 def test_validation_case_requires_validation_candidate_source_result() -> None:
@@ -109,6 +121,7 @@ def test_validation_case_requires_validation_candidate_source_result() -> None:
         build_validation_case(
             result=_candidate_result(strategy_state=StrategyResearchState.RESEARCH_ONLY),
             policy_id="phase2-policy-v1",
+            policy_digest=POLICY_DIGEST,
         )
 
 
@@ -155,7 +168,19 @@ def test_validation_case_rejects_duplicate_stage_evidence_keys() -> None:
         build_validation_case(
             result=_candidate_result(),
             policy_id="phase2-policy-v1",
+            policy_digest=POLICY_DIGEST,
             evidence=(evidence, evidence),
+        )
+
+
+def test_validation_case_rejects_invalid_policy_digest() -> None:
+    """A validation case cannot be built without a canonical policy content digest."""
+
+    with pytest.raises(ValueError, match="policy_digest"):
+        build_validation_case(
+            result=_candidate_result(),
+            policy_id="phase2-policy-v1",
+            policy_digest="not-a-digest",
         )
 
 
@@ -165,6 +190,7 @@ def test_validation_case_rejects_tampered_identity_and_execution_authority() -> 
     case = build_validation_case(
         result=_candidate_result(),
         policy_id="phase2-policy-v1",
+        policy_digest=POLICY_DIGEST,
         evidence=(_evidence(ValidationStage.HYPOTHESIS, suffix="a"),),
     )
     payload = case.model_dump(mode="python")
