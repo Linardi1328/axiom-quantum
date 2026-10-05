@@ -55,6 +55,9 @@ rewrite the historical source artifacts.
 The migration layer must:
 
 - require the result parent ID to match the canonical experiment definition;
+- require an explicit, nonempty source-system identifier and nonempty source experiment/record IDs
+  before any research-memory write;
+- preserve the exact source system in the migration receipt and its deterministic identity;
 - preserve the exact `StrategyResearchState` already produced by the source adapter;
 - preserve Phase-3 source experiment provenance in canonical tags and the migration receipt;
 - generate the same experiment, result, and migration receipt identities for equivalent inputs;
@@ -87,7 +90,8 @@ Phase 1 is complete only after the final Slice 6 pull request satisfies all of t
 - all six implementation slices are merged into `main`;
 - deterministic identity and idempotency tests pass;
 - migration conflict/corruption tests fail closed as intended;
-- migrated Phase-3 provenance and research state are preserved;
+- migrated source provenance and research state are preserved;
+- invalid or incomplete migration provenance fails before persistence;
 - a report can be rendered from records re-loaded from Axiom Research Memory;
 - Ruff check and format check pass;
 - Mypy passes for `src` and `tests`;
