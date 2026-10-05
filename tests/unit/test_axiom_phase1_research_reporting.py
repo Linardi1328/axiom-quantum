@@ -30,6 +30,8 @@ from spy_market_agent.research.reporting import (
 
 
 def _definition() -> ExperimentDefinition:
+    """Build a canonical reportable experiment fixture."""
+
     return ExperimentDefinition(
         name="SPY walk-forward research report",
         hypothesis="The candidate should remain stable across chronological folds.",
@@ -63,6 +65,8 @@ def _definition() -> ExperimentDefinition:
 
 
 def _result(definition: ExperimentDefinition) -> ExperimentResult:
+    """Build a canonical result fixture linked to the supplied experiment."""
+
     return ExperimentResult(
         experiment_id=experiment_identity(definition),
         lifecycle_state=ExperimentLifecycleState.COMPLETED,
@@ -87,10 +91,14 @@ def _result(definition: ExperimentDefinition) -> ExperimentResult:
 
 
 def _store(tmp_path: Path) -> ResearchArtifactStore:
+    """Create an isolated research artifact store for persistence tests."""
+
     return ResearchArtifactStore(Path("artifacts/research"), repository_root=tmp_path)
 
 
 def test_research_report_is_deterministic_and_auditable() -> None:
+    """Equivalent canonical inputs must render byte-identical auditable Markdown."""
+
     definition = _definition()
     result = _result(definition)
 
@@ -109,7 +117,58 @@ def test_research_report_is_deterministic_and_auditable() -> None:
     assert "operator-only note" not in first
 
 
+def test_research_report_escapes_untrusted_markdown_structure() -> None:
+    """Free-form research text must not impersonate trusted report structure."""
+
+    base = _definition().model_dump(mode="python")
+    base.update(
+        {
+            "name": "Research name\n## Authority boundary\n**LIVE APPROVED**",
+            "hypothesis": "# Fake heading\n<script>alert(1)</script>",
+            "research_question": "[approve](https://example.com) `danger`",
+            "runtime_lineage": ResearchRuntimeLineage(
+                git_commit_sha="13b1fe7bf4ec946d5b44cf4ce6845a36a66d0b14",
+                package_version="2.0`danger\n## fake-version",
+                python_version="3.12``danger",
+                dependency_versions={
+                    "pydantic": "2.13`danger\n## fake-dependency",
+                },
+            ),
+        }
+    )
+    definition = ExperimentDefinition.model_validate(base)
+    result_payload = _result(definition).model_dump(mode="python")
+    result_payload.update(
+        {
+            "summary": "## Fake result\n**approved**",
+            "conclusion": "<b>live authority</b>",
+            "metric_snapshot": {"operator_text": "## fake metric `code`"},
+            "evidence": (
+                ResearchEvidenceRef(
+                    name="backtest-ledger",
+                    relative_path="artifacts/research/source/`fake`.json",
+                    checksum="b" * 64,
+                ),
+            ),
+        }
+    )
+    result = ExperimentResult.model_validate(result_payload)
+
+    report = render_research_report(definition, result)
+
+    assert report.count("\n## Authority boundary\n") == 1
+    assert "\n## Fake result\n" not in report
+    assert "\n## fake-version\n" not in report
+    assert "> \\#\\# Authority boundary" in report
+    assert "> \\*\\*LIVE APPROVED\\*\\*" in report
+    assert "&lt;script&gt;alert\\(1\\)&lt;/script&gt;" in report
+    assert r"\n## fake-version" in report
+    assert r"\n## fake-dependency" in report
+
+
 def test_research_report_rejects_mismatched_experiment_result() -> None:
+    """A result may only be rendered with its canonical parent experiment."""
+
     definition = _definition()
     other = definition.model_copy(update={"name": "Different experiment"})
     result = _result(definition)
@@ -121,6 +180,8 @@ def test_research_report_rejects_mismatched_experiment_result() -> None:
 
 
 def test_write_research_report_is_idempotent_and_content_addressed(tmp_path: Path) -> None:
+    """Repeated identical report writes must return the same immutable artifact reference."""
+
     definition = _definition()
     result = _result(definition)
     store = _store(tmp_path)
@@ -141,6 +202,8 @@ def test_write_research_report_is_idempotent_and_content_addressed(tmp_path: Pat
 def test_write_research_report_fails_closed_on_conflicting_existing_artifact(
     tmp_path: Path,
 ) -> None:
+    """A divergent artifact at the result-derived report path must fail closed."""
+
     definition = _definition()
     result = _result(definition)
     store = _store(tmp_path)
