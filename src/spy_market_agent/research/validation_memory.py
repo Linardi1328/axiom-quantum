@@ -43,12 +43,16 @@ class ValidationDecisionRecord(BaseModel):
     @field_validator("decision_id")
     @classmethod
     def _decision_id(cls, value: str) -> str:
+        """Require the canonical content-addressed decision ID shape."""
+
         if not _DECISION_ID.fullmatch(value):
             raise ValueError("decision_id must be a canonical Axiom validation decision identity")
         return value
 
     @model_validator(mode="after")
     def _identity_matches(self) -> ValidationDecisionRecord:
+        """Fail closed when the stored ID does not match decision content."""
+
         if self.schema_version != VALIDATION_DECISION_RECORD_SCHEMA_VERSION:
             raise ValueError("unsupported validation decision record schema version")
         if self.decision_id != validation_decision_identity(self.decision):
@@ -67,6 +71,8 @@ class GraveyardFailedGate(BaseModel):
 
     @model_validator(mode="after")
     def _canonical_failure(self) -> GraveyardFailedGate:
+        """Require deterministic, nonempty failure evidence for a valid stage."""
+
         if self.stage not in VALIDATION_REQUIRED_EVIDENCE_STAGES:
             raise ValueError("graveyard failure must reference a required validation stage")
         if not self.check_ids or not self.reasons:
@@ -97,6 +103,8 @@ class StrategyGraveyardEntry(BaseModel):
     @field_validator("graveyard_id")
     @classmethod
     def _graveyard_id(cls, value: str) -> str:
+        """Require the canonical content-addressed graveyard ID shape."""
+
         if not _GRAVEYARD_ID.fullmatch(value):
             raise ValueError("graveyard_id must be a canonical Axiom graveyard identity")
         return value
@@ -104,6 +112,8 @@ class StrategyGraveyardEntry(BaseModel):
     @field_validator("decision_id")
     @classmethod
     def _linked_decision_id(cls, value: str) -> str:
+        """Require a canonical validation-decision identity link."""
+
         if not _DECISION_ID.fullmatch(value):
             raise ValueError("graveyard decision_id must be canonical")
         return value
@@ -113,6 +123,8 @@ class StrategyGraveyardEntry(BaseModel):
     def _failed_gates(
         cls, value: tuple[GraveyardFailedGate, ...]
     ) -> tuple[GraveyardFailedGate, ...]:
+        """Require unique failed stages and normalize them to validation order."""
+
         if not value:
             raise ValueError("graveyard entry requires at least one failed validation gate")
         stages = tuple(item.stage for item in value)
@@ -122,6 +134,8 @@ class StrategyGraveyardEntry(BaseModel):
 
     @model_validator(mode="after")
     def _identity_matches(self) -> StrategyGraveyardEntry:
+        """Fail closed when the entry ID does not match canonical content."""
+
         if self.schema_version != STRATEGY_GRAVEYARD_SCHEMA_VERSION:
             raise ValueError("unsupported strategy graveyard schema version")
         if self.graveyard_id != strategy_graveyard_identity(self):
@@ -192,9 +206,13 @@ class ValidationMemoryRegistry:
     """Append-only validation memory and rejected-strategy graveyard."""
 
     def __init__(self, store: ResearchArtifactStore | None = None) -> None:
+        """Use the supplied safe artifact store or the repository default."""
+
         self.store = store or ResearchArtifactStore()
 
     def record_decision(self, decision: ValidationDecision) -> str:
+        """Persist one canonical validation decision idempotently and verify reload."""
+
         canonical = ValidationDecision.model_validate(decision.model_dump(mode="python"))
         decision_id = validation_decision_identity(canonical)
         record = ValidationDecisionRecord(decision_id=decision_id, decision=canonical)
@@ -214,6 +232,8 @@ class ValidationMemoryRegistry:
         return decision_id
 
     def load_decision(self, experiment_id: str, decision_id: str) -> ValidationDecisionRecord:
+        """Load and validate one decision beneath its expected parent experiment."""
+
         payload = self.store.read_json(experiment_id, self._decision_name(decision_id))
         try:
             record = ValidationDecisionRecord.model_validate(payload)
@@ -232,9 +252,13 @@ class ValidationMemoryRegistry:
         return record
 
     def list_decision_ids(self, experiment_id: str) -> tuple[str, ...]:
+        """List stored decision identities for one experiment in sorted order."""
+
         return self._list_ids(experiment_id, VALIDATION_DECISION_PREFIX)
 
     def record_graveyard_entry(self, decision: ValidationDecision) -> str:
+        """Persist a graveyard record only for an already-stored rejected decision."""
+
         canonical = ValidationDecision.model_validate(decision.model_dump(mode="python"))
         decision_id = validation_decision_identity(canonical)
         stored_decision = self.load_decision(canonical.experiment_id, decision_id)
@@ -265,6 +289,8 @@ class ValidationMemoryRegistry:
         experiment_id: str,
         graveyard_id: str,
     ) -> StrategyGraveyardEntry:
+        """Load a graveyard entry and verify its linked rejected decision."""
+
         payload = self.store.read_json(experiment_id, self._graveyard_name(graveyard_id))
         try:
             entry = StrategyGraveyardEntry.model_validate(payload)
@@ -297,9 +323,13 @@ class ValidationMemoryRegistry:
         return entry
 
     def list_graveyard_ids(self, experiment_id: str) -> tuple[str, ...]:
+        """List stored graveyard identities for one experiment in sorted order."""
+
         return self._list_ids(experiment_id, STRATEGY_GRAVEYARD_PREFIX)
 
     def _list_ids(self, experiment_id: str, prefix: str) -> tuple[str, ...]:
+        """Extract canonical IDs from append-only artifact names with one prefix."""
+
         suffix = ".json"
         return tuple(
             sorted(
@@ -311,6 +341,8 @@ class ValidationMemoryRegistry:
 
     @staticmethod
     def _decision_name(decision_id: str) -> str:
+        """Map a canonical decision ID to its immutable JSON artifact name."""
+
         if not _DECISION_ID.fullmatch(decision_id):
             raise_research_error(
                 ResearchRegistryError,
@@ -321,6 +353,8 @@ class ValidationMemoryRegistry:
 
     @staticmethod
     def _graveyard_name(graveyard_id: str) -> str:
+        """Map a canonical graveyard ID to its immutable JSON artifact name."""
+
         if not _GRAVEYARD_ID.fullmatch(graveyard_id):
             raise_research_error(
                 ResearchRegistryError,
