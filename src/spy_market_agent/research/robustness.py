@@ -277,7 +277,7 @@ def _annualized_return(
 
     if wealth == 0.0:
         return -1.0
-    value = wealth ** (annualization_periods / period_count) - 1.0
+    value = float(wealth ** (annualization_periods / period_count) - 1.0)
     if not math.isfinite(value):
         raise ValueError("annualized return must be finite")
     return value
