@@ -120,9 +120,7 @@ class MetricRobustnessSummary(BaseModel):
         )
         if any(not math.isfinite(item) for item in numeric_values):
             raise ValueError("robustness summary values must be finite")
-        if self.relative_degradation is not None and not math.isfinite(
-            self.relative_degradation
-        ):
+        if self.relative_degradation is not None and not math.isfinite(self.relative_degradation):
             raise ValueError("relative_degradation must be finite when present")
         if self.absolute_degradation < 0.0:
             raise ValueError("absolute_degradation must not be negative")
@@ -134,9 +132,7 @@ class CanonicalRobustnessEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-robustness-evidence-v1"] = (
-        "axiom-robustness-evidence-v1"
-    )
+    schema_version: Literal["axiom-robustness-evidence-v1"] = "axiom-robustness-evidence-v1"
     baseline_scenario_id: str
     scenario_ids: tuple[str, ...]
     summaries: tuple[MetricRobustnessSummary, ...]
@@ -212,11 +208,7 @@ def canonical_robustness_evidence(
             if metric_name in scenario.metrics
         ]
         baseline_value = float(baseline.metrics[metric_name])
-        worst_value = (
-            min(values)
-            if direction == MetricDirection.HIGHER_IS_BETTER
-            else max(values)
-        )
+        worst_value = min(values) if direction == MetricDirection.HIGHER_IS_BETTER else max(values)
         absolute_degradation = (
             baseline_value - worst_value
             if direction == MetricDirection.HIGHER_IS_BETTER
@@ -224,9 +216,7 @@ def canonical_robustness_evidence(
         )
         absolute_degradation = max(0.0, absolute_degradation)
         relative_degradation = (
-            absolute_degradation / abs(baseline_value)
-            if baseline_value != 0.0
-            else None
+            absolute_degradation / abs(baseline_value) if baseline_value != 0.0 else None
         )
         summaries.append(
             MetricRobustnessSummary(
@@ -275,9 +265,7 @@ def robustness_evidence_to_axiom_result(
         metric_snapshot[f"{prefix}.worst"] = summary.worst_value
         metric_snapshot[f"{prefix}.absolute_degradation"] = summary.absolute_degradation
         if summary.relative_degradation is not None:
-            metric_snapshot[f"{prefix}.relative_degradation"] = (
-                summary.relative_degradation
-            )
+            metric_snapshot[f"{prefix}.relative_degradation"] = summary.relative_degradation
 
     return ExperimentResult(
         experiment_id=experiment_id,
