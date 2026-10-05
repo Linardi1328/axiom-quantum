@@ -299,9 +299,7 @@ def evaluate_validation_case(
         else:
             passed_reasons.append(f"required evidence stage {stage.value} is present")
 
-        for metric_threshold in (
-            item for item in policy.metric_thresholds if item.stage == stage
-        ):
+        for metric_threshold in (item for item in policy.metric_thresholds if item.stage == stage):
             checks.append(metric_threshold.gate_id)
             value = _numeric_metric(source_result, metric_threshold.metric_name)
             if value is None:
@@ -351,8 +349,7 @@ def evaluate_validation_case(
                 )
             if (
                 robustness_threshold.maximum_absolute_degradation is not None
-                and summary.absolute_degradation
-                > robustness_threshold.maximum_absolute_degradation
+                and summary.absolute_degradation > robustness_threshold.maximum_absolute_degradation
             ):
                 failed = True
                 failed_reasons.append(
@@ -366,8 +363,7 @@ def evaluate_validation_case(
                         f"{robustness_threshold.gate_id} is undefined"
                     )
                 elif (
-                    summary.relative_degradation
-                    > robustness_threshold.maximum_relative_degradation
+                    summary.relative_degradation > robustness_threshold.maximum_relative_degradation
                 ):
                     failed = True
                     failed_reasons.append(
@@ -377,9 +373,7 @@ def evaluate_validation_case(
             if not failed and not any(
                 robustness_threshold.gate_id in reason for reason in missing_reasons
             ):
-                passed_reasons.append(
-                    f"robustness threshold {robustness_threshold.gate_id} passed"
-                )
+                passed_reasons.append(f"robustness threshold {robustness_threshold.gate_id} passed")
 
         if stage == ValidationStage.RESAMPLING:
             resampling_threshold = policy.resampling_threshold
