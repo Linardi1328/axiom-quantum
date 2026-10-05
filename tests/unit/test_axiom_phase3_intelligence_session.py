@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from spy_market_agent.benchmark.artifacts import sha256_json
 from spy_market_agent.intelligence.axiom_session import (
+    INTELLIGENCE_SESSION_ID_VERSION,
     IntelligenceSession,
     build_intelligence_session,
     intelligence_session_identity,
@@ -212,6 +214,58 @@ def test_session_rejects_tampered_identity() -> None:
 
     with pytest.raises(ValidationError, match="must match canonical"):
         IntelligenceSession.model_validate(payload)
+
+
+def _reidentify_session_payload(payload: dict[str, object]) -> dict[str, object]:
+    """Recompute a would-be valid session ID to exercise public-boundary admission checks."""
+
+    identity_payload = {key: value for key, value in payload.items() if key != "session_id"} | {
+        "identity_version": INTELLIGENCE_SESSION_ID_VERSION
+    }
+    return payload | {"session_id": f"aq-intel-session-{sha256_json(identity_payload)[:24]}"}
+
+
+def test_direct_session_validation_cannot_bypass_phase2_admission() -> None:
+    """Recomputed content identity cannot turn a rejected decision into a Phase 3 session."""
+
+    session = build_intelligence_session(
+        decision=_decision(),
+        intelligence_run=_intelligence_run(),
+        invocation_id="owner-session-001",
+    )
+    rejected = _decision(ValidationVerdict.REJECTED)
+    payload = session.model_dump(mode="python")
+    payload["decision"] = rejected
+    payload["decision_id"] = validation_decision_identity(rejected)
+
+    with pytest.raises(ValidationError, match="validated_research_candidate"):
+        IntelligenceSession.model_validate(_reidentify_session_payload(payload))
+
+
+def test_direct_session_validation_cannot_bypass_run_lineage() -> None:
+    """Recomputed content identity cannot attach a forged run ID to canonical run fields."""
+
+    session = build_intelligence_session(
+        decision=_decision(),
+        intelligence_run=_intelligence_run(),
+        invocation_id="owner-session-001",
+    )
+    run = session.intelligence_run
+    forged = IntelligenceRunIdentity(
+        run_id="mi0-run-forged",
+        target_instrument_id=run.target_instrument_id,
+        as_of=run.as_of,
+        analysis_profile_id=run.analysis_profile_id,
+        snapshot_ids=run.snapshot_ids,
+        code_revision=run.code_revision,
+        configuration_hash=run.configuration_hash,
+    )
+    payload = session.model_dump(mode="python")
+    payload["intelligence_run"] = forged
+    payload["intelligence_run_id"] = forged.run_id
+
+    with pytest.raises(ValidationError, match="must match its canonical lineage"):
+        IntelligenceSession.model_validate(_reidentify_session_payload(payload))
 
 
 @pytest.mark.parametrize(
