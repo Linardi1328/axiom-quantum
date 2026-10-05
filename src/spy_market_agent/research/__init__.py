@@ -96,6 +96,15 @@ from spy_market_agent.research.reporting import (
     research_report_name,
     write_research_report,
 )
+from spy_market_agent.research.robustness import (
+    ROBUSTNESS_EVIDENCE_SCHEMA_VERSION,
+    CanonicalRobustnessEvidence,
+    ReturnPathRobustness,
+    RobustnessScenario,
+    return_path_robustness,
+    robustness_evidence_to_axiom_result,
+    scenario_robustness_evidence,
+)
 from spy_market_agent.research.runner import run_development_campaign
 from spy_market_agent.research.scenario_candidate import (
     MI1D_CANDIDATE_ID,
@@ -183,8 +192,10 @@ __all__ = [
     "PHASE3_PHASE_ID",
     "RESEARCH_REPORT_PREFIX",
     "RESEARCH_REPORT_SCHEMA_VERSION",
+    "ROBUSTNESS_EVIDENCE_SCHEMA_VERSION",
     "WALK_FORWARD_FOLD_POLICY_ID",
     "CanonicalBacktestEvidence",
+    "CanonicalRobustnessEvidence",
     "ExperimentDefinition",
     "ExperimentLifecycleState",
     "ExperimentOutcome",
@@ -197,6 +208,8 @@ __all__ = [
     "ResearchMemoryRegistry",
     "ResearchReportArtifact",
     "ResearchRuntimeLineage",
+    "ReturnPathRobustness",
+    "RobustnessScenario",
     "ScenarioBaseline",
     "ScenarioBaselineBenchmark",
     "ScenarioBaselineEvaluation",
@@ -249,7 +262,10 @@ __all__ = [
     "report_artifact_path",
     "required_classification_baselines",
     "research_report_name",
+    "return_path_robustness",
+    "robustness_evidence_to_axiom_result",
     "run_development_campaign",
+    "scenario_robustness_evidence",
     "strategy_threshold_policy",
     "validate_inner_training_search",
     "validate_no_forbidden_feature_columns",
