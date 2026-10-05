@@ -209,6 +209,16 @@ from spy_market_agent.research.validation_memory import (
     strategy_graveyard_identity,
     validation_decision_identity,
 )
+from spy_market_agent.research.validation_reporting import (
+    VALIDATION_REPORT_PREFIX,
+    VALIDATION_REPORT_SCHEMA_VERSION,
+    ValidationReportArtifact,
+    ValidationWorkflowResult,
+    render_validation_report,
+    run_validation_workflow,
+    validation_report_name,
+    write_validation_report,
+)
 
 __all__ = [
     "AXIOM_EXPERIMENT_ID_VERSION",
@@ -259,6 +269,8 @@ __all__ = [
     "VALIDATION_DECISION_ID_VERSION",
     "VALIDATION_DECISION_RECORD_SCHEMA_VERSION",
     "VALIDATION_DECISION_SCHEMA_VERSION",
+    "VALIDATION_REPORT_PREFIX",
+    "VALIDATION_REPORT_SCHEMA_VERSION",
     "VALIDATION_REQUIRED_EVIDENCE_STAGES",
     "WALK_FORWARD_FOLD_POLICY_ID",
     "CanonicalBacktestEvidence",
@@ -314,8 +326,10 @@ __all__ = [
     "ValidationGateStatus",
     "ValidationMemoryRegistry",
     "ValidationPolicy",
+    "ValidationReportArtifact",
     "ValidationStage",
     "ValidationVerdict",
+    "ValidationWorkflowResult",
     "ablation_scaffold",
     "aggregate_metric",
     "assert_protected_evaluation_not_accessed",
@@ -356,6 +370,7 @@ __all__ = [
     "planned_trials_from_grid",
     "rank_classification_candidates",
     "render_research_report",
+    "render_validation_report",
     "report_artifact_path",
     "required_classification_baselines",
     "resampling_evidence_to_axiom_result",
@@ -363,6 +378,7 @@ __all__ = [
     "research_report_name",
     "robustness_evidence_to_axiom_result",
     "run_development_campaign",
+    "run_validation_workflow",
     "strategy_graveyard_identity",
     "strategy_threshold_policy",
     "validate_inner_training_search",
@@ -372,5 +388,7 @@ __all__ = [
     "validate_training_only_fit_scope",
     "validation_case_identity",
     "validation_decision_identity",
+    "validation_report_name",
     "write_research_report",
+    "write_validation_report",
 ]
