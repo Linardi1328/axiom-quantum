@@ -1,6 +1,6 @@
 # Axiom Quantum Phase 2 - Validation Engine Specification
 
-Status: Active - Slice 1 implementation
+Status: Final implementation candidate - complete upon squash merge of PR #63
 
 Linear issues: `RIC-25` through `RIC-29`
 
@@ -146,4 +146,7 @@ Slice 1 is complete only when:
 - Betterleaks passes;
 - CodeRabbit performs a genuine ready-for-review pass with no unresolved actionable findings.
 
-Later slices remain unauthorized until their preceding slice is squash-merged into `main`.
+Slices 2 through 5 are implemented under `RIC-26` through `RIC-29`. The final end-to-end contract,
+reporting behavior, safety boundaries, and completion gates are recorded in
+`docs/AQ_PHASE_02_COMPLETION_SPEC.md`. Phase 2 remains research-only even after completion; Phase 3
+requires a separate authorization boundary.
