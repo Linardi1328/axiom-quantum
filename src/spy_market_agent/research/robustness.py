@@ -159,8 +159,7 @@ class CanonicalRobustnessEvidence(BaseModel):
         if len(metric_names) != len(set(metric_names)):
             raise ValueError("robustness metric summaries must be unique")
         if any(
-            summary.total_scenario_count != len(self.scenario_ids)
-            for summary in self.summaries
+            summary.total_scenario_count != len(self.scenario_ids) for summary in self.summaries
         ):
             raise ValueError("summary total_scenario_count must match scenario_ids")
         return self
