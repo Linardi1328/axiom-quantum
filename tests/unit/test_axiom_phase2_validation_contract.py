@@ -27,6 +27,8 @@ COMPLETED_AT = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 def _candidate_result(
     *, strategy_state: StrategyResearchState = StrategyResearchState.VALIDATION_CANDIDATE
 ) -> ExperimentResult:
+    """Build a compact completed result fixture with configurable research state."""
+
     return ExperimentResult(
         experiment_id="aq-exp-111111111111111111111111",
         lifecycle_state=ExperimentLifecycleState.COMPLETED,
@@ -45,6 +47,8 @@ def _evidence(
     suffix: str,
     source_kind: ValidationEvidenceSourceKind = ValidationEvidenceSourceKind.RESEARCH_ARTIFACT,
 ) -> ValidationEvidenceRef:
+    """Build one deterministic validation evidence reference fixture."""
+
     return ValidationEvidenceRef(
         stage=stage,
         source_kind=source_kind,
@@ -55,6 +59,8 @@ def _evidence(
 
 
 def test_validation_case_identity_is_order_independent_and_tracks_missing_stages() -> None:
+    """Equivalent evidence order yields one identity while absent stages stay explicit."""
+
     result = _candidate_result()
     backtest = _evidence(ValidationStage.BACKTEST, suffix="b")
     hypothesis = _evidence(ValidationStage.HYPOTHESIS, suffix="a")
@@ -79,6 +85,8 @@ def test_validation_case_identity_is_order_independent_and_tracks_missing_stages
 
 
 def test_validation_case_identity_changes_with_scientific_evidence() -> None:
+    """Changing the evidence manifest changes the content-addressed validation identity."""
+
     result = _candidate_result()
     baseline = build_validation_case(
         result=result,
@@ -95,6 +103,8 @@ def test_validation_case_identity_changes_with_scientific_evidence() -> None:
 
 
 def test_validation_case_requires_validation_candidate_source_result() -> None:
+    """Research-only results cannot enter the Phase 2 validation case builder."""
+
     with pytest.raises(ValueError, match="validation_candidate"):
         build_validation_case(
             result=_candidate_result(strategy_state=StrategyResearchState.RESEARCH_ONLY),
@@ -115,6 +125,8 @@ def test_validation_evidence_rejects_unsafe_identifiers_and_checksums(
     value: str,
     message: str,
 ) -> None:
+    """Unsafe provenance identifiers and malformed checksums fail closed."""
+
     payload: dict[str, object] = {
         "stage": ValidationStage.HYPOTHESIS,
         "source_kind": ValidationEvidenceSourceKind.CANONICAL_EXPERIMENT,
@@ -129,11 +141,15 @@ def test_validation_evidence_rejects_unsafe_identifiers_and_checksums(
 
 
 def test_validation_evidence_rejects_candidate_decision_as_input_stage() -> None:
+    """The candidate-decision output stage cannot masquerade as input evidence."""
+
     with pytest.raises(ValidationError, match="output stage"):
         _evidence(ValidationStage.CANDIDATE_DECISION, suffix="a")
 
 
 def test_validation_case_rejects_duplicate_stage_evidence_keys() -> None:
+    """Duplicate stage/evidence keys are rejected before a case identity is created."""
+
     evidence = _evidence(ValidationStage.HYPOTHESIS, suffix="a")
     with pytest.raises(ValueError, match="must be unique"):
         build_validation_case(
@@ -144,6 +160,8 @@ def test_validation_case_rejects_duplicate_stage_evidence_keys() -> None:
 
 
 def test_validation_case_rejects_tampered_identity_and_execution_authority() -> None:
+    """Serialized validation cases reject identity tampering and non-none authority."""
+
     case = build_validation_case(
         result=_candidate_result(),
         policy_id="phase2-policy-v1",
