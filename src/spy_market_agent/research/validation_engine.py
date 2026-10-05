@@ -387,7 +387,8 @@ def evaluate_validation_case(
                 checks.append(resampling_threshold.gate_id)
                 if resampling_evidence is None:
                     missing_reasons.append(
-                        f"resampling evidence required by {resampling_threshold.gate_id} is unavailable"
+                        "resampling evidence required by "
+                        f"{resampling_threshold.gate_id} is unavailable"
                     )
                 else:
                     if (
@@ -395,7 +396,8 @@ def evaluate_validation_case(
                         > resampling_threshold.maximum_loss_frequency
                     ):
                         failed_reasons.append(
-                            f"resampling loss frequency {resampling_evidence.loss_frequency} exceeds "
+                            "resampling loss frequency "
+                            f"{resampling_evidence.loss_frequency} exceeds "
                             f"{resampling_threshold.maximum_loss_frequency}"
                         )
                     if (
