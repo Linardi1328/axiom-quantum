@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator, model_validator
 
 from spy_market_agent.benchmark.artifacts import sha256_json
 from spy_market_agent.intelligence.axiom_session import IntelligenceSession
@@ -14,6 +15,7 @@ INTELLIGENCE_EVIDENCE_ID_VERSION = "axiom-intelligence-evidence-id-v1"
 
 _EVIDENCE_ID = re.compile(r"^aq-intel-evidence-[0-9a-f]{24}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_BRIEF_ADAPTER = TypeAdapter(SPYMarketIntelligenceBrief)
 
 
 class MarketIntelligenceEvidence(BaseModel):
@@ -27,6 +29,15 @@ class MarketIntelligenceEvidence(BaseModel):
     brief: SPYMarketIntelligenceBrief
     brief_digest: str
     execution_authority: Literal["none"] = "none"
+
+    @field_validator("brief", mode="before")
+    @classmethod
+    def _own_canonical_brief(cls, value: object) -> object:
+        """Reconstruct supplied brief instances so mutable caller aliases cannot survive."""
+
+        if isinstance(value, SPYMarketIntelligenceBrief):
+            return asdict(value)
+        return value
 
     @field_validator("evidence_id")
     @classmethod
@@ -94,11 +105,12 @@ def build_market_intelligence_evidence(
     """Bind a validated Phase 3 session to its exact deterministic Market Intelligence brief."""
 
     canonical_session = IntelligenceSession.model_validate(session.model_dump(mode="python"))
-    brief_digest = sha256_json(brief)
+    canonical_brief = _BRIEF_ADAPTER.validate_python(asdict(brief))
+    brief_digest = sha256_json(canonical_brief)
     payload: dict[str, object] = {
         "schema_version": INTELLIGENCE_EVIDENCE_SCHEMA_VERSION,
         "session": canonical_session,
-        "brief": brief,
+        "brief": canonical_brief,
         "brief_digest": brief_digest,
         "execution_authority": "none",
     }
