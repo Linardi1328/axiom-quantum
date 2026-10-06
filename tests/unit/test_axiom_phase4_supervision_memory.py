@@ -213,6 +213,21 @@ def test_memory_rejects_noncanonical_identity_requests(tmp_path: Path) -> None:
         memory.load_session(session.experiment_id, "../unsafe")
 
 
+def test_memory_listing_rejects_noncanonical_prefixed_artifacts(tmp_path: Path) -> None:
+    """Listings fail closed when a supervision-prefixed artifact has a malformed identity."""
+
+    store, _, memory, session, _, _ = _stored_chain(tmp_path)
+    store.write_json(
+        session.experiment_id,
+        "axiom_supervision_session_not-canonical.json",
+        {"unexpected": True},
+        allow_replace=False,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="artifact name is not canonical"):
+        memory.list_session_ids(session.experiment_id)
+
+
 def test_memory_module_is_authority_free() -> None:
     """Slice 4 persistence contains no trading or unattended-operation machinery."""
 
