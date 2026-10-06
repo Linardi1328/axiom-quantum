@@ -98,9 +98,7 @@ def build_supervised_session(
 ) -> SupervisedSession:
     """Open one explicit human-requested session over an exact stored Phase 3 report."""
 
-    canonical_report = IntelligenceReportArtifact.model_validate(
-        report.model_dump(mode="python")
-    )
+    canonical_report = IntelligenceReportArtifact.model_validate(report.model_dump(mode="python"))
     load_intelligence_report(canonical_report, registry=registry)
 
     payload: dict[str, object] = {
@@ -118,6 +116,4 @@ def build_supervised_session(
     }
     identity_payload = payload | {"identity_version": SUPERVISED_SESSION_ID_VERSION}
     session_id = f"aq-supervision-session-{sha256_json(identity_payload)[:24]}"
-    return SupervisedSession.model_validate(
-        {"supervision_session_id": session_id, **payload}
-    )
+    return SupervisedSession.model_validate({"supervision_session_id": session_id, **payload})
