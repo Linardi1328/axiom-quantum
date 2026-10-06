@@ -26,7 +26,7 @@ Phase 4 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - preserved Phase 3 terminal verdict;
    - deterministic `aq-supervision-session-*` identity;
    - execution authority fixed to `none`.
-2. **Planned - Supervised Review Queue (`RIC-37`)**
+2. **Implemented - Supervised Review Queue (`RIC-37`)**
    - one immutable review item per exact supervised session;
    - `present_for_human_review` becomes `pending_human_review`;
    - `abstain` becomes a non-reviewable preserved abstention;
@@ -110,6 +110,20 @@ A supervised session:
 - derives `supervision_session_id` from canonical content.
 
 The builder must call the Phase 3 report loader before admission so checksum, path, deterministic rendering, and the complete stored Phase 3 parent chain are verified.
+
+## Slice 2 Contract
+
+Slice 2 introduces `SupervisedReviewItem`, `SupervisedReviewStatus`, and `build_supervised_review_item`.
+
+A review item:
+
+- embeds one canonical `SupervisedSession`;
+- re-verifies the exact stored Phase 3 report and complete parent chain before construction;
+- maps `present_for_human_review` only to `pending_human_review`;
+- maps `abstain` only to `non_reviewable_abstention`;
+- cannot reinterpret, upgrade, or weaken the stored Phase 3 verdict;
+- derives `review_item_id` from canonical content;
+- fixes `execution_authority` to `none`.
 
 ## Quality and Merge Gates
 

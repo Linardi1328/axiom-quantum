@@ -32,19 +32,27 @@ def _review_item(
         invocation_id=invocation_id,
         registry=IntelligenceMemoryRegistry(store),
     )
-    return build_supervised_review_item(session=session)
+    return build_supervised_review_item(session=session, registry=IntelligenceMemoryRegistry(store))
 
 
 def test_review_item_is_deterministic_and_exactly_bound_to_session(tmp_path: Path) -> None:
     """Repeated construction preserves exact lineage and content identity."""
 
-    item = _review_item(tmp_path)
-    repeated = build_supervised_review_item(session=item.session)
+    store, phase3 = _phase3_result(tmp_path)
+    registry = IntelligenceMemoryRegistry(store)
+    session = build_supervised_session(
+        report=phase3.report,
+        invocation_id="human-review-queue",
+        registry=registry,
+    )
+    item = build_supervised_review_item(session=session, registry=registry)
+    repeated = build_supervised_review_item(session=session, registry=registry)
 
     assert item == repeated
+    assert item.session == session
     assert item.schema_version == SUPERVISED_REVIEW_ITEM_SCHEMA_VERSION
     assert item.review_item_id == supervised_review_item_identity(item)
-    assert item.supervision_session_id == item.session.supervision_session_id
+    assert item.supervision_session_id == session.supervision_session_id
     assert item.report_id == item.session.report_id
     assert item.experiment_id == item.session.experiment_id
     assert item.phase3_verdict == DecisionSupportVerdict.PRESENT_FOR_HUMAN_REVIEW
@@ -106,3 +114,30 @@ def test_review_queue_module_is_authority_free() -> None:
     )
     for marker in forbidden:
         assert marker not in source
+
+
+def test_review_item_reverifies_stored_phase3_parent_chain(tmp_path: Path) -> None:
+    """Queue admission fails closed when stored Phase 3 report bytes are tampered."""
+
+    from spy_market_agent.benchmark.artifacts import sha256_bytes
+    from spy_market_agent.intelligence.axiom_reporting import intelligence_report_name
+    from spy_market_agent.research.errors import ResearchRegistryError
+
+    store, phase3 = _phase3_result(tmp_path)
+    registry = IntelligenceMemoryRegistry(store)
+    session = build_supervised_session(
+        report=phase3.report,
+        invocation_id="human-review-queue-tamper",
+        registry=registry,
+    )
+    altered = b"tampered Phase 3 report before review-queue admission\n"
+    store.write_bytes(
+        phase3.session.experiment_id,
+        intelligence_report_name(phase3.assessment),
+        altered,
+        expected_checksum=sha256_bytes(altered),
+        allow_replace=True,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="checksum does not match"):
+        build_supervised_review_item(session=session, registry=registry)

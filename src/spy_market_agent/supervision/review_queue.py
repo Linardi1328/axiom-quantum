@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from spy_market_agent.benchmark.artifacts import sha256_json
 from spy_market_agent.intelligence.axiom_decision_support import DecisionSupportVerdict
+from spy_market_agent.intelligence.axiom_memory import IntelligenceMemoryRegistry
+from spy_market_agent.intelligence.axiom_reporting import load_intelligence_report
 from spy_market_agent.supervision.session import SupervisedSession
 
 SUPERVISED_REVIEW_ITEM_SCHEMA_VERSION = "axiom-supervised-review-item-v1"
@@ -84,10 +86,15 @@ def supervised_review_item_identity(item: SupervisedReviewItem) -> str:
     return f"aq-supervision-review-{sha256_json(payload)[:24]}"
 
 
-def build_supervised_review_item(*, session: SupervisedSession) -> SupervisedReviewItem:
-    """Derive an authority-free review item without reinterpreting the Phase 3 verdict."""
+def build_supervised_review_item(
+    *,
+    session: SupervisedSession,
+    registry: IntelligenceMemoryRegistry,
+) -> SupervisedReviewItem:
+    """Derive a review item only after re-verifying its stored Phase 3 parent chain."""
 
     canonical_session = SupervisedSession.model_validate(session.model_dump(mode="python"))
+    load_intelligence_report(canonical_session.report, registry=registry)
     payload: dict[str, object] = {
         "schema_version": SUPERVISED_REVIEW_ITEM_SCHEMA_VERSION,
         "session": canonical_session,
