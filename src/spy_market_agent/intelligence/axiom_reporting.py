@@ -188,10 +188,9 @@ def render_intelligence_report(assessment: DecisionSupportAssessment) -> str:
         lines.append("- Reasons: none")
 
     lines.extend(["", "## Market state", ""])
-    if not brief.market_state.dimensions:
-        lines.append("- No market-state dimensions supplied.")
     for dimension in brief.market_state.dimensions:
         value = "unavailable" if dimension.value is None else repr(dimension.value)
+        unit = "none" if dimension.unit is None else dimension.unit
         lines.append(
             "- "
             + _code_span(dimension.dimension_id)
@@ -200,7 +199,7 @@ def render_intelligence_report(assessment: DecisionSupportAssessment) -> str:
             + ", value="
             + _code_span(value)
             + ", unit="
-            + _code_span(dimension.unit)
+            + _code_span(unit)
         )
 
     lines.extend(["", "## Scenario evidence", ""])
