@@ -65,6 +65,8 @@ AS_OF = datetime(2026, 10, 6, 18, 0, tzinfo=UTC)
 
 
 def _decision() -> ValidationDecision:
+    """Build one valid stored Phase 2 decision for Phase 3 integration tests."""
+
     return ValidationDecision(
         validation_id="aq-validation-111111111111111111111111",
         experiment_id="aq-exp-222222222222222222222222",
@@ -85,6 +87,8 @@ def _decision() -> ValidationDecision:
 
 
 def _run() -> IntelligenceRunIdentity:
+    """Build one deterministic point-in-time Intelligence Run identity."""
+
     return derive_intelligence_run_identity(
         target_instrument_id="spy-us-equity-etf",
         as_of=AS_OF,
@@ -96,6 +100,8 @@ def _run() -> IntelligenceRunIdentity:
 
 
 def _stable_degradation() -> DegradationAssessment:
+    """Build degradation evidence that legitimately clears the Phase 3 gate."""
+
     rows = MI1J_MINIMUM_RECENT_ROWS
     metrics = ScenarioEvaluationMetrics(
         row_count=rows,
@@ -124,6 +130,8 @@ def _stable_degradation() -> DegradationAssessment:
 
 
 def _brief(*, actionable: bool = True) -> SPYMarketIntelligenceBrief:
+    """Build a canonical brief for either human-review or abstention coverage."""
+
     run = _run()
     forecast = ScenarioForecast(
         run_identity=run,
@@ -170,16 +178,22 @@ def _brief(*, actionable: bool = True) -> SPYMarketIntelligenceBrief:
 
 
 def _store(tmp_path: Path) -> ResearchArtifactStore:
+    """Create one isolated artifact store rooted inside the test directory."""
+
     return ResearchArtifactStore(tmp_path / "artifacts", repository_root=tmp_path)
 
 
 def _record_phase2(store: ResearchArtifactStore, decision: ValidationDecision) -> None:
+    """Persist the required Phase 2 parent decision before Phase 3 admission."""
+
     ValidationMemoryRegistry(store).record_decision(decision)
 
 
 def test_human_review_workflow_is_deterministic_persisted_and_authority_free(
     tmp_path: Path,
 ) -> None:
+    """The valid path persists exact lineage and deterministically reaches human review."""
+
     decision = _decision()
     store = _store(tmp_path)
     _record_phase2(store, decision)
@@ -211,6 +225,8 @@ def test_human_review_workflow_is_deterministic_persisted_and_authority_free(
 
 
 def test_abstention_path_is_persisted_without_gate_weakening(tmp_path: Path) -> None:
+    """Weak scenario evidence remains an abstention without policy relaxation."""
+
     decision = _decision()
     store = _store(tmp_path)
     _record_phase2(store, decision)
@@ -230,6 +246,8 @@ def test_abstention_path_is_persisted_without_gate_weakening(tmp_path: Path) -> 
 
 
 def test_workflow_requires_the_exact_stored_phase2_decision(tmp_path: Path) -> None:
+    """Phase 3 admission fails closed when the exact Phase 2 parent is absent."""
+
     with pytest.raises(ResearchArtifactError, match="required research artifact is missing"):
         run_intelligence_os_workflow(
             decision=_decision(),
@@ -240,6 +258,8 @@ def test_workflow_requires_the_exact_stored_phase2_decision(tmp_path: Path) -> N
 
 
 def test_report_reload_detects_tampering(tmp_path: Path) -> None:
+    """Reload rejects a persisted report whose bytes no longer match its checksum."""
+
     decision = _decision()
     store = _store(tmp_path)
     _record_phase2(store, decision)
@@ -264,6 +284,8 @@ def test_report_reload_detects_tampering(tmp_path: Path) -> None:
 
 
 def test_reporting_module_stays_decision_support_only_and_import_safe() -> None:
+    """The reporting boundary stays isolated and preserves research-first imports."""
+
     from inspect import getsource
 
     from spy_market_agent.intelligence import axiom_reporting
