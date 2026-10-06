@@ -138,7 +138,19 @@ def test_disposition_rejects_parent_substitution(tmp_path: Path) -> None:
     """Public validation cannot silently swap the exact review-item parent."""
 
     registry, first = _review_parent(tmp_path / "first")
-    _, second = _review_parent(tmp_path / "second")
+    second_store, second_phase3 = _phase3_result(tmp_path / "second")
+    second_registry = IntelligenceMemoryRegistry(second_store)
+    second_session = build_supervised_session(
+        report=second_phase3.report,
+        invocation_id="different-human-invocation",
+        registry=second_registry,
+    )
+    second = build_supervised_review_item(
+        session=second_session,
+        registry=second_registry,
+    )
+    assert second.review_item_id != first.review_item_id
+
     disposition = build_supervised_disposition(
         review_item=first,
         disposition=HumanReviewDisposition.OBSERVED,
