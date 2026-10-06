@@ -84,6 +84,17 @@ if TYPE_CHECKING:
         INTELLIGENCE_SESSION_PREFIX,
         IntelligenceMemoryRegistry,
     )
+    from spy_market_agent.intelligence.axiom_reporting import (
+        INTELLIGENCE_REPORT_PREFIX,
+        INTELLIGENCE_REPORT_SCHEMA_VERSION,
+        IntelligenceReportArtifact,
+        IntelligenceWorkflowResult,
+        intelligence_report_name,
+        load_intelligence_report,
+        render_intelligence_report,
+        run_intelligence_os_workflow,
+        write_intelligence_report,
+    )
 
 _LAZY_PHASE3_EXPORTS = {
     "DECISION_SUPPORT_ID_VERSION": "axiom_decision_support",
@@ -99,14 +110,23 @@ _LAZY_PHASE3_EXPORTS = {
     "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION": "axiom_evidence",
     "INTELLIGENCE_ASSESSMENT_PREFIX": "axiom_memory",
     "INTELLIGENCE_EVIDENCE_PREFIX": "axiom_memory",
+    "INTELLIGENCE_REPORT_PREFIX": "axiom_reporting",
+    "INTELLIGENCE_REPORT_SCHEMA_VERSION": "axiom_reporting",
     "INTELLIGENCE_SESSION_PREFIX": "axiom_memory",
     "IntelligenceMemoryRegistry": "axiom_memory",
+    "IntelligenceReportArtifact": "axiom_reporting",
+    "IntelligenceWorkflowResult": "axiom_reporting",
     "MarketIntelligenceEvidence": "axiom_evidence",
     "assess_intelligence_evidence": "axiom_decision_support",
     "build_market_intelligence_evidence": "axiom_evidence",
     "decision_support_assessment_identity": "axiom_decision_support",
     "decision_support_policy_digest": "axiom_decision_support",
     "intelligence_evidence_identity": "axiom_evidence",
+    "intelligence_report_name": "axiom_reporting",
+    "load_intelligence_report": "axiom_reporting",
+    "render_intelligence_report": "axiom_reporting",
+    "run_intelligence_os_workflow": "axiom_reporting",
+    "write_intelligence_report": "axiom_reporting",
 }
 
 
@@ -128,6 +148,8 @@ __all__ = [
     "INTELLIGENCE_EVIDENCE_ID_VERSION",
     "INTELLIGENCE_EVIDENCE_PREFIX",
     "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION",
+    "INTELLIGENCE_REPORT_PREFIX",
+    "INTELLIGENCE_REPORT_SCHEMA_VERSION",
     "INTELLIGENCE_SESSION_ID_VERSION",
     "INTELLIGENCE_SESSION_PREFIX",
     "INTELLIGENCE_SESSION_SCHEMA_VERSION",
@@ -156,8 +178,10 @@ __all__ = [
     "HorizonUnit",
     "InstrumentProfile",
     "IntelligenceMemoryRegistry",
+    "IntelligenceReportArtifact",
     "IntelligenceRunIdentity",
     "IntelligenceSession",
+    "IntelligenceWorkflowResult",
     "MarketIntelligenceEvidence",
     "MarketStateDimension",
     "MarketStateSnapshot",
@@ -181,6 +205,11 @@ __all__ = [
     "derive_spy_market_state",
     "evidence_reference_ids",
     "intelligence_evidence_identity",
+    "intelligence_report_name",
     "intelligence_session_identity",
     "legacy_spy_market_data_to_snapshot",
+    "load_intelligence_report",
+    "render_intelligence_report",
+    "run_intelligence_os_workflow",
+    "write_intelligence_report",
 ]
