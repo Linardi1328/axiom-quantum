@@ -94,6 +94,7 @@ class CrossAssetRelationshipSummary:
                 value = getattr(self, field_name)
                 if value is None or not math.isfinite(float(value)):
                     raise ValueError(f"{field_name} must be finite when available.")
+                object.__setattr__(self, field_name, float(value))
 
 
 def evaluate_cross_asset_relationship(
