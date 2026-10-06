@@ -36,6 +36,7 @@ from spy_market_agent.intelligence.degradation import (
     DegradationStatus,
 )
 from spy_market_agent.intelligence.scenarios import (
+    AbstentionReason,
     CalibrationStatus,
     ScenarioActionabilityDecision,
     ScenarioDecisionStatus,
@@ -140,7 +141,7 @@ def _brief(*, actionable: bool = True) -> SPYMarketIntelligenceBrief:
             ScenarioDecisionStatus.HIGH_EVIDENCE if actionable else ScenarioDecisionStatus.ABSTAIN
         ),
         selected_outcome=ScenarioOutcome.UPSIDE if actionable else None,
-        reasons=() if actionable else ("low_scenario_confidence",),
+        reasons=() if actionable else (AbstentionReason.LOW_SCENARIO_CONFIDENCE,),
     )
     return build_spy_market_intelligence_brief(
         run_identity=run,
