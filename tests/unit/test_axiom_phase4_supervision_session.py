@@ -4,6 +4,12 @@ from inspect import getsource
 from pathlib import Path
 
 import pytest
+from tests.unit.test_axiom_phase3_reporting_completion import (
+    _brief,
+    _decision,
+    _record_phase2,
+    _store,
+)
 
 from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.intelligence.axiom_decision_support import DecisionSupportVerdict
@@ -20,12 +26,6 @@ from spy_market_agent.supervision import (
     SupervisedSession,
     build_supervised_session,
     supervised_session_identity,
-)
-from tests.unit.test_axiom_phase3_reporting_completion import (
-    _brief,
-    _decision,
-    _record_phase2,
-    _store,
 )
 
 
