@@ -8,7 +8,10 @@ import pytest
 
 from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.intelligence.axiom_decision_support import DecisionSupportVerdict
-from spy_market_agent.intelligence.axiom_memory import IntelligenceMemoryRegistry
+from spy_market_agent.intelligence.axiom_memory import (
+    INTELLIGENCE_ASSESSMENT_PREFIX,
+    IntelligenceMemoryRegistry,
+)
 from spy_market_agent.intelligence.axiom_reporting import (
     IntelligenceWorkflowResult,
     intelligence_report_name,
@@ -294,6 +297,32 @@ def test_supervised_session_requires_verified_stored_phase3_report(tmp_path: Pat
         build_supervised_session(
             report=phase3.report,
             invocation_id="human-review-tampered",
+            registry=IntelligenceMemoryRegistry(store),
+        )
+
+
+def test_supervised_session_rejects_substituted_stored_phase3_parent(tmp_path: Path) -> None:
+    """Builder admission fails closed when a stored Phase 3 parent is substituted."""
+
+    store, phase3 = _phase3_result(tmp_path)
+    alternate = run_intelligence_os_workflow(
+        decision=_decision(),
+        brief=_brief(),
+        invocation_id="phase4-alternate-parent",
+        store=store,
+    )
+    original_name = f"{INTELLIGENCE_ASSESSMENT_PREFIX}{phase3.assessment.assessment_id}.json"
+    store.write_json(
+        phase3.session.experiment_id,
+        original_name,
+        alternate.assessment,
+        allow_replace=True,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="identity and experiment must match"):
+        build_supervised_session(
+            report=phase3.report,
+            invocation_id="human-review-substituted-parent",
             registry=IntelligenceMemoryRegistry(store),
         )
 
