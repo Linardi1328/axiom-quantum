@@ -18,29 +18,29 @@ Phase 4 admission requires the completed Phase 3 lineage to already exist in sto
 
 Phase 4 never reconstructs, substitutes, infers, weakens, or silently repairs missing Phase 3 evidence.
 
-## Implemented Slices
+## Phase 4 Slices
 
-1. **Supervised Session Contract (`RIC-36`)**
+1. **Implemented - Supervised Session Contract (`RIC-36`)**
    - one exact stored Phase 3 report as the parent;
    - explicit `human_requested` invocation source;
    - preserved Phase 3 terminal verdict;
    - deterministic `aq-supervision-session-*` identity;
    - execution authority fixed to `none`.
-2. **Supervised Review Queue (`RIC-37`)**
+2. **Planned - Supervised Review Queue (`RIC-37`)**
    - one immutable review item per exact supervised session;
    - `present_for_human_review` becomes `pending_human_review`;
    - `abstain` becomes a non-reviewable preserved abstention;
    - no trade-proposal or execution semantics.
-3. **Human Review Disposition (`RIC-38`)**
+3. **Planned - Human Review Disposition (`RIC-38`)**
    - immutable human-only observational disposition;
    - supported outcomes: `observed`, `deferred`, `dismissed`, and `abstention_acknowledged`;
    - abstentions may only be acknowledged and never upgraded;
    - no execution approval semantics.
-4. **Supervision Memory (`RIC-39`)**
+4. **Planned - Supervision Memory (`RIC-39`)**
    - append-only session, review-item, and disposition persistence;
    - exact stored parent-chain verification;
    - conflict, corruption, substitution, and tamper rejection.
-5. **Supervision Reporting and Completion (`RIC-40`)**
+5. **Planned - Supervision Reporting and Completion (`RIC-40`)**
    - deterministic human-auditable supervision report;
    - append-only checksum-verified report persistence;
    - explicit human-invoked end-to-end orchestration over stored Phase 3 lineage;

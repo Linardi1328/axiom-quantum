@@ -69,6 +69,8 @@ AS_OF = datetime(2026, 10, 7, 10, 0, tzinfo=UTC)
 
 
 def _decision() -> ValidationDecision:
+    """Build a deterministic validated Phase 2 parent for Phase 4 tests."""
+
     return ValidationDecision(
         validation_id="aq-validation-411111111111111111111111",
         experiment_id="aq-exp-422222222222222222222222",
@@ -89,6 +91,8 @@ def _decision() -> ValidationDecision:
 
 
 def _run() -> IntelligenceRunIdentity:
+    """Build the deterministic Intelligence OS run identity used by Slice 1 tests."""
+
     return derive_intelligence_run_identity(
         target_instrument_id="spy-us-equity-etf",
         as_of=AS_OF,
@@ -100,6 +104,8 @@ def _run() -> IntelligenceRunIdentity:
 
 
 def _stable_degradation() -> DegradationAssessment:
+    """Build stable degradation evidence that satisfies Phase 3 decision-support gates."""
+
     rows = MI1J_MINIMUM_RECENT_ROWS
     metrics = ScenarioEvaluationMetrics(
         row_count=rows,
@@ -128,6 +134,8 @@ def _stable_degradation() -> DegradationAssessment:
 
 
 def _brief(*, actionable: bool = True) -> SPYMarketIntelligenceBrief:
+    """Build a deterministic Phase 3 brief for reviewable or abstention paths."""
+
     run = _run()
     forecast = ScenarioForecast(
         run_identity=run,
@@ -174,10 +182,14 @@ def _brief(*, actionable: bool = True) -> SPYMarketIntelligenceBrief:
 
 
 def _store(tmp_path: Path) -> ResearchArtifactStore:
+    """Create an isolated artifact store for one Phase 4 test."""
+
     return ResearchArtifactStore(tmp_path / "artifacts", repository_root=tmp_path)
 
 
 def _record_phase2(store: ResearchArtifactStore, decision: ValidationDecision) -> None:
+    """Persist the exact Phase 2 validation decision required by Phase 3."""
+
     ValidationMemoryRegistry(store).record_decision(decision)
 
 
@@ -186,6 +198,8 @@ def _phase3_result(
     *,
     actionable: bool = True,
 ) -> tuple[ResearchArtifactStore, IntelligenceWorkflowResult]:
+    """Run and persist one verified Phase 3 parent workflow for Slice 1 tests."""
+
     decision = _decision()
     store = _store(tmp_path)
     _record_phase2(store, decision)
