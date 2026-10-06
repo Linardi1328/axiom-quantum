@@ -1,3 +1,11 @@
+from spy_market_agent.supervision.disposition import (
+    SUPERVISED_DISPOSITION_ID_VERSION,
+    SUPERVISED_DISPOSITION_SCHEMA_VERSION,
+    HumanReviewDisposition,
+    SupervisedDisposition,
+    build_supervised_disposition,
+    supervised_disposition_identity,
+)
 from spy_market_agent.supervision.review_queue import (
     SUPERVISED_REVIEW_ITEM_ID_VERSION,
     SUPERVISED_REVIEW_ITEM_SCHEMA_VERSION,
@@ -16,6 +24,12 @@ from spy_market_agent.supervision.session import (
 )
 
 __all__ = [
+    "SUPERVISED_DISPOSITION_ID_VERSION",
+    "SUPERVISED_DISPOSITION_SCHEMA_VERSION",
+    "HumanReviewDisposition",
+    "SupervisedDisposition",
+    "build_supervised_disposition",
+    "supervised_disposition_identity",
     "SUPERVISED_REVIEW_ITEM_ID_VERSION",
     "SUPERVISED_REVIEW_ITEM_SCHEMA_VERSION",
     "SUPERVISED_SESSION_ID_VERSION",
