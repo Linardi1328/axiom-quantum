@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -344,3 +346,22 @@ def test_bridge_module_retains_non_execution_boundary() -> None:
     assert "spy_market_agent.paper_ops" not in source
     assert "alpaca.trading" not in source
     assert "TradingClient" not in source
+
+
+def test_public_bridge_export_does_not_create_research_import_cycle() -> None:
+    """Research-first import order can still resolve the lazy public Phase 3 bridge export."""
+
+    code = """
+from spy_market_agent.research import runner
+from spy_market_agent.intelligence import MarketIntelligenceEvidence
+assert runner is not None
+assert MarketIntelligenceEvidence.__name__ == 'MarketIntelligenceEvidence'
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
