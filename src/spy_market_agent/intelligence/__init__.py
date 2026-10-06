@@ -1,10 +1,6 @@
-from spy_market_agent.intelligence.axiom_evidence import (
-    INTELLIGENCE_EVIDENCE_ID_VERSION,
-    INTELLIGENCE_EVIDENCE_SCHEMA_VERSION,
-    MarketIntelligenceEvidence,
-    build_market_intelligence_evidence,
-    intelligence_evidence_identity,
-)
+from importlib import import_module
+from typing import TYPE_CHECKING
+
 from spy_market_agent.intelligence.axiom_session import (
     INTELLIGENCE_SESSION_ID_VERSION,
     INTELLIGENCE_SESSION_SCHEMA_VERSION,
@@ -59,6 +55,35 @@ from spy_market_agent.intelligence.state import (
     MarketStateSnapshot,
     StateAvailability,
 )
+
+if TYPE_CHECKING:
+    from spy_market_agent.intelligence.axiom_evidence import (
+        INTELLIGENCE_EVIDENCE_ID_VERSION,
+        INTELLIGENCE_EVIDENCE_SCHEMA_VERSION,
+        MarketIntelligenceEvidence,
+        build_market_intelligence_evidence,
+        intelligence_evidence_identity,
+    )
+
+_LAZY_AXIOM_EVIDENCE_EXPORTS = frozenset(
+    {
+        "INTELLIGENCE_EVIDENCE_ID_VERSION",
+        "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION",
+        "MarketIntelligenceEvidence",
+        "build_market_intelligence_evidence",
+        "intelligence_evidence_identity",
+    }
+)
+
+
+def __getattr__(name: str) -> object:
+    """Load the brief-dependent Phase 3 bridge without creating research import cycles."""
+
+    if name in _LAZY_AXIOM_EVIDENCE_EXPORTS:
+        module = import_module("spy_market_agent.intelligence.axiom_evidence")
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "INTELLIGENCE_EVIDENCE_ID_VERSION",
