@@ -145,9 +145,7 @@ class SupervisionMemoryRegistry:
     def record_disposition(self, disposition: SupervisedDisposition) -> str:
         """Persist one human disposition only when its exact stored review parent verifies."""
 
-        canonical = SupervisedDisposition.model_validate(
-            disposition.model_dump(mode="python")
-        )
+        canonical = SupervisedDisposition.model_validate(disposition.model_dump(mode="python"))
         stored_item = self.load_review_item(
             canonical.experiment_id,
             canonical.review_item_id,
