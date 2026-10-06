@@ -2,7 +2,7 @@
 
 Status: Owner-authorized implementation
 
-Linear: `RIC-30` and follow-on Phase 3 slices
+Linear: `RIC-30` through `RIC-34`
 
 Authorized on: 2026-10-05
 
@@ -46,22 +46,22 @@ is still research-only and carries no execution authority.
    - exact point-in-time Market Intelligence run lineage;
    - invocation source fixed to `human_requested`;
    - execution authority fixed to `none`.
-2. **Canonical Market Intelligence Bridge**
+2. **Canonical Market Intelligence Bridge (`RIC-31`)**
    - deterministic evidence snapshot from an exact Market Intelligence brief;
    - scenario, market-state, data-quality, degradation, relationship, analogue, and limitation
      lineage retained without introducing execution semantics;
    - exact run/session cross-link validation.
-3. **Decision-Support Gate Engine**
+3. **Decision-Support Gate Engine (`RIC-32`)**
    - explicit Phase 3 decision-support policy;
    - fail-closed gates over candidate validation, data quality, market-state availability,
      scenario actionability, and degradation evidence;
    - terminal result limited to `present_for_human_review` or `abstain`;
    - no trade direction, quantity, position size, or order fields.
-4. **Intelligence Memory**
+4. **Intelligence Memory (`RIC-33`)**
    - append-only session, evidence, and decision-support records;
    - deterministic content identities and exact reload verification;
    - conflict/corruption/cross-link mismatches fail closed.
-5. **Intelligence Reporting and Completion**
+5. **Intelligence Reporting and Completion (`RIC-34`)**
    - deterministic human-auditable Intelligence OS report;
    - append-only checksum-verified report persistence;
    - end-to-end human-invoked workflow orchestration;
