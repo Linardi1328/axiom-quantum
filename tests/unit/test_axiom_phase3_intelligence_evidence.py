@@ -308,6 +308,33 @@ def test_evidence_owns_immutable_copy_of_preconstructed_brief_collections() -> N
     assert evidence.brief_digest == bound_digest == sha256_json(evidence.brief)
 
 
+def test_available_relationship_measurements_are_canonical_before_brief_hashing() -> None:
+    """Integer-compatible measurements normalize before the bridge binds the brief digest."""
+
+    relationship = CrossAssetRelationshipSummary(
+        policy_id=MI1H_RELATIONSHIP_POLICY_ID,
+        target_series_id="spy",
+        context_series_id="vix",
+        as_of=AS_OF,
+        trailing_window=20,
+        availability=RelationshipAvailability.AVAILABLE,
+        aligned_observation_count=21,
+        return_correlation=1,
+        target_return=1,
+        context_return=0,
+        relative_performance=1,
+        reason=None,
+        target_snapshot_id="mi0-snapshot-spy",
+        context_snapshot_id="mi0-snapshot-vix",
+    )
+    brief = _brief(relationships=(relationship,))
+    evidence = build_market_intelligence_evidence(session=_session(), brief=brief)
+
+    assert relationship.return_correlation == 1.0
+    assert isinstance(relationship.return_correlation, float)
+    assert evidence.brief_digest == sha256_json(brief) == sha256_json(evidence.brief)
+
+
 def test_evidence_rejects_brief_from_another_intelligence_run() -> None:
     """A valid brief cannot be attached to a different Phase 3 point-in-time run."""
 
