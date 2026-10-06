@@ -1,0 +1,35 @@
+{
+  "artifact_schema_version": "spy-v2-phase3-research-artifacts-v1",
+  "campaign_config_id": "phase3-development-classification-campaign-v1",
+  "random_seed": 42,
+  "minimum_valid_fold_count": 3,
+  "material_roc_auc_delta": 0.01,
+  "materially_different_tolerance": 0.005,
+  "diagnostic_classification_threshold": 0.5,
+  "reliability_bin_count": 10,
+  "small_regime_cell_rows": 30,
+  "global_feature_warmup_rows": 60,
+  "assessment_window_rows": 126,
+  "step_rows": 63,
+  "minimum_initial_training_rows": 756,
+  "minimum_final_assessment_rows": 63,
+  "outer_boundary_exclusion_rows": 6,
+  "psi_bin_count": 10,
+  "psi_epsilon": 0.000001,
+  "drawdown_bucket_thresholds": [
+    -0.1,
+    -0.05
+  ],
+  "development_procedure": [
+    "run_feature_ablations",
+    "select_development_feature_set",
+    "run_uncalibrated_model_candidate_campaign",
+    "rank_uncalibrated_development_candidates",
+    "run_calibration_substudy_for_highest_ranked_uncalibrated_candidate",
+    "report_probability_quality_and_candidate_promotion"
+  ],
+  "classification_first": true,
+  "strategy_optimization_authorized": false,
+  "protected_evaluation_authorized": false,
+  "phase2_final_test_available_for_tuning": false
+}

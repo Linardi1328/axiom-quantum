@@ -1,0 +1,61 @@
+{
+  "fixture_type": "synthetic-alpaca-phase1-market-data",
+  "license": "synthetic fixture created for tests; not provider or real SPY market data",
+  "scenarios": {
+    "valid_raw_page_1": {
+      "bars": {
+        "SPY": [
+          {"t": "2024-01-02T05:00:00Z", "o": "100.00", "h": "101.00", "l": "99.50", "c": "100.50", "v": "1000000"},
+          {"t": "2024-01-03T05:00:00Z", "o": "100.50", "h": "102.00", "l": "100.00", "c": "101.25", "v": "1000100"}
+        ]
+      },
+      "next_page_token": "page-2"
+    },
+    "valid_raw_page_2": {
+      "bars": {
+        "SPY": [
+          {"t": "2024-01-04T05:00:00Z", "o": "101.25", "h": "103.00", "l": "101.00", "c": "102.75", "v": "1000200"},
+          {"t": "2024-01-05T05:00:00Z", "o": "102.75", "h": "104.00", "l": "102.50", "c": "103.50", "v": "1000300"}
+        ]
+      },
+      "next_page_token": null
+    },
+    "valid_all_adjusted": {
+      "bars": {
+        "SPY": [
+          {"t": "2024-01-02T05:00:00Z", "o": "99.00", "h": "100.00", "l": "98.50", "c": "99.50", "v": "1010000"},
+          {"t": "2024-01-03T05:00:00Z", "o": "99.50", "h": "101.00", "l": "99.00", "c": "100.25", "v": "1010100"},
+          {"t": "2024-01-04T05:00:00Z", "o": "100.25", "h": "102.00", "l": "100.00", "c": "101.75", "v": "1010200"},
+          {"t": "2024-01-05T05:00:00Z", "o": "101.75", "h": "103.00", "l": "101.50", "c": "102.50", "v": "1010300"}
+        ]
+      },
+      "next_page_token": null
+    },
+    "invalid_examples": {
+      "duplicate_session": {"t": "2024-01-03T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "1"},
+      "missing_expected_session": "omit 2024-01-04 from a 2024-01-02 through 2024-01-05 request",
+      "weekend_record": {"t": "2024-01-06T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "1"},
+      "holiday_record": {"t": "2024-01-01T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "1"},
+      "out_of_order_records": "place 2024-01-03 before 2024-01-02",
+      "future_session": {"t": "2099-01-02T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "1"},
+      "incomplete_final_session": "use an as_of timestamp before the final XNYS close",
+      "zero_price": {"t": "2024-01-02T05:00:00Z", "o": "0", "h": "101", "l": "99", "c": "100", "v": "1"},
+      "negative_price": {"t": "2024-01-02T05:00:00Z", "o": "-1", "h": "101", "l": "99", "c": "100", "v": "1"},
+      "nan_or_infinite_value": {"t": "2024-01-02T05:00:00Z", "o": "NaN", "h": "Infinity", "l": "99", "c": "100", "v": "1"},
+      "negative_volume": {"t": "2024-01-02T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "-1"},
+      "malformed_volume": {"t": "2024-01-02T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "1.5"},
+      "inconsistent_ohlc": {"t": "2024-01-02T05:00:00Z", "o": "100", "h": "99", "l": "101", "c": "100", "v": "1"},
+      "wrong_symbol": {"AAPL": [{"t": "2024-01-02T05:00:00Z", "o": "100", "h": "101", "l": "99", "c": "100", "v": "1"}]},
+      "wrong_feed": "request feed differs from fixture scenario metadata",
+      "mixed_adjustment_mode": "raw and all-adjusted fixtures must be requested and stored separately",
+      "malformed_provider_payload": {"unexpected": "shape"},
+      "partial_provider_response": {"bars": {"SPY": [{"t": "2024-01-02T05:00:00Z"}]}},
+      "repeated_pagination_token": "page response returns the same non-null next_page_token repeatedly",
+      "checksum_mismatch": "alter a written artifact after manifest creation",
+      "manifest_mismatch": "alter manifest checksum or dataset identity",
+      "interrupted_write": "raise during atomic temporary-file replace",
+      "existing_conflicting_artifact": "pre-create an artifact path with different bytes",
+      "credential_redaction": "placeholder credential-header names are used for redaction tests; no credential values are stored in this fixture"
+    }
+  }
+}

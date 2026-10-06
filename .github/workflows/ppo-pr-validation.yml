@@ -1,0 +1,45 @@
+name: PPO PR validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.10"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --extra dev --locked
+      - name: Node syntax checks
+        shell: bash
+        run: |
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find . -path ./.git -prune -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -print0)
+      - name: Shell syntax checks
+        shell: bash
+        run: |
+          while IFS= read -r -d '' file; do bash -n "$file"; done < <(find . -path ./.git -prune -o -type f -name '*.sh' -print0)
+      - name: Full regression suite
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          uv run --no-sync mypy src tests
+          uv run --no-sync pytest --cov-fail-under=85
+      - name: Diff whitespace checks
+        run: |
+          git diff --check
+          git diff --check origin/main...HEAD
