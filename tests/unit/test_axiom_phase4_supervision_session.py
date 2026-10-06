@@ -1,15 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from inspect import getsource
 from pathlib import Path
 
 import pytest
-from tests.unit.test_axiom_phase3_reporting_completion import (
-    _brief,
-    _decision,
-    _record_phase2,
-    _store,
-)
 
 from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.intelligence.axiom_decision_support import DecisionSupportVerdict
@@ -19,14 +14,171 @@ from spy_market_agent.intelligence.axiom_reporting import (
     intelligence_report_name,
     run_intelligence_os_workflow,
 )
+from spy_market_agent.intelligence.brief import (
+    ScenarioBriefEntry,
+    SPYMarketIntelligenceBrief,
+    build_spy_market_intelligence_brief,
+)
+from spy_market_agent.intelligence.contracts import (
+    AnalysisHorizon,
+    DataQualityDecision,
+    DataQualityStatus,
+    HorizonUnit,
+    IntelligenceRunIdentity,
+    derive_intelligence_run_identity,
+)
+from spy_market_agent.intelligence.degradation import (
+    MI1J_DEGRADATION_POLICY_ID,
+    MI1J_MINIMUM_RECENT_ROWS,
+    DegradationAssessment,
+    DegradationStatus,
+)
+from spy_market_agent.intelligence.scenarios import (
+    AbstentionReason,
+    CalibrationStatus,
+    ScenarioActionabilityDecision,
+    ScenarioDecisionStatus,
+    ScenarioForecast,
+    ScenarioOutcome,
+    ScenarioProbability,
+)
+from spy_market_agent.intelligence.state import (
+    MarketStateDimension,
+    MarketStateSnapshot,
+    StateAvailability,
+)
 from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError
+from spy_market_agent.research.scenario_evaluation import ScenarioEvaluationMetrics
+from spy_market_agent.research.validation_contract import VALIDATION_REQUIRED_EVIDENCE_STAGES
+from spy_market_agent.research.validation_engine import (
+    ValidationDecision,
+    ValidationGateResult,
+    ValidationGateStatus,
+    ValidationVerdict,
+)
+from spy_market_agent.research.validation_memory import ValidationMemoryRegistry
 from spy_market_agent.supervision import (
     SUPERVISED_SESSION_SCHEMA_VERSION,
     SupervisedSession,
     build_supervised_session,
     supervised_session_identity,
 )
+
+AS_OF = datetime(2026, 10, 7, 10, 0, tzinfo=UTC)
+
+
+def _decision() -> ValidationDecision:
+    return ValidationDecision(
+        validation_id="aq-validation-411111111111111111111111",
+        experiment_id="aq-exp-422222222222222222222222",
+        result_id="aq-result-433333333333333333333333",
+        policy_id="phase2-policy-v1",
+        policy_digest="a" * 64,
+        verdict=ValidationVerdict.VALIDATED_RESEARCH_CANDIDATE,
+        gates=tuple(
+            ValidationGateResult(
+                stage=stage,
+                status=ValidationGateStatus.PASSED,
+                check_ids=(f"structural:{stage.value}",),
+                reasons=("evidence passed",),
+            )
+            for stage in VALIDATION_REQUIRED_EVIDENCE_STAGES
+        ),
+    )
+
+
+def _run() -> IntelligenceRunIdentity:
+    return derive_intelligence_run_identity(
+        target_instrument_id="spy-us-equity-etf",
+        as_of=AS_OF,
+        analysis_profile_id="mi1-spy-analysis-v1",
+        snapshot_ids=("mi0-snapshot-spy",),
+        code_revision="phase4-slice1-test",
+        configuration_hash="b" * 64,
+    )
+
+
+def _stable_degradation() -> DegradationAssessment:
+    rows = MI1J_MINIMUM_RECENT_ROWS
+    metrics = ScenarioEvaluationMetrics(
+        row_count=rows,
+        downside_count=21,
+        range_count=21,
+        upside_count=21,
+        predicted_downside_count=21,
+        predicted_range_count=21,
+        predicted_upside_count=21,
+        accuracy=0.7,
+        multiclass_log_loss=0.5,
+        multiclass_brier_score=0.3,
+        mean_true_class_probability=0.65,
+    )
+    return DegradationAssessment(
+        policy_id=MI1J_DEGRADATION_POLICY_ID,
+        status=DegradationStatus.STABLE,
+        recent_row_count=rows,
+        recent_metrics=metrics,
+        recent_ece=0.05,
+        selected_rows=20,
+        selected_precision=0.7,
+        selected_coverage=20 / rows,
+        breached_metrics=(),
+    )
+
+
+def _brief(*, actionable: bool = True) -> SPYMarketIntelligenceBrief:
+    run = _run()
+    forecast = ScenarioForecast(
+        run_identity=run,
+        horizon=AnalysisHorizon(unit=HorizonUnit.SESSIONS, length=5),
+        probabilities=(
+            ScenarioProbability(outcome=ScenarioOutcome.DOWNSIDE, probability=0.1),
+            ScenarioProbability(outcome=ScenarioOutcome.RANGE, probability=0.2),
+            ScenarioProbability(outcome=ScenarioOutcome.UPSIDE, probability=0.7),
+        ),
+        calibration_status=CalibrationStatus.CALIBRATED,
+        evidence_refs=("evidence-trend",),
+    )
+    actionability = ScenarioActionabilityDecision(
+        status=(
+            ScenarioDecisionStatus.HIGH_EVIDENCE if actionable else ScenarioDecisionStatus.ABSTAIN
+        ),
+        selected_outcome=ScenarioOutcome.UPSIDE if actionable else None,
+        reasons=() if actionable else (AbstentionReason.LOW_SCENARIO_CONFIDENCE,),
+    )
+    return build_spy_market_intelligence_brief(
+        run_identity=run,
+        data_quality=DataQualityDecision(
+            status=DataQualityStatus.VERIFIED,
+            eligible=True,
+            reasons=(),
+        ),
+        market_state=MarketStateSnapshot(
+            run_identity=run,
+            dimensions=(
+                MarketStateDimension(
+                    dimension_id="trend",
+                    label="Trend",
+                    availability=StateAvailability.AVAILABLE,
+                    value=0.02,
+                    unit="return",
+                    evidence_refs=("evidence-trend",),
+                ),
+            ),
+        ),
+        scenarios=(ScenarioBriefEntry(forecast=forecast, actionability=actionability),),
+        degradation=(_stable_degradation(),),
+        limitations=("Human decision support only.",),
+    )
+
+
+def _store(tmp_path: Path) -> ResearchArtifactStore:
+    return ResearchArtifactStore(tmp_path / "artifacts", repository_root=tmp_path)
+
+
+def _record_phase2(store: ResearchArtifactStore, decision: ValidationDecision) -> None:
+    ValidationMemoryRegistry(store).record_decision(decision)
 
 
 def _phase3_result(
