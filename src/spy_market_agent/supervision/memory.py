@@ -211,27 +211,38 @@ class SupervisionMemoryRegistry:
     def list_session_ids(self, experiment_id: str) -> tuple[str, ...]:
         """List stored supervision-session identities in deterministic order."""
 
-        return self._list_ids(experiment_id, SUPERVISION_SESSION_PREFIX)
+        return self._list_ids(experiment_id, SUPERVISION_SESSION_PREFIX, _SESSION_ID)
 
     def list_review_item_ids(self, experiment_id: str) -> tuple[str, ...]:
         """List stored review-item identities in deterministic order."""
 
-        return self._list_ids(experiment_id, SUPERVISION_REVIEW_PREFIX)
+        return self._list_ids(experiment_id, SUPERVISION_REVIEW_PREFIX, _REVIEW_ID)
 
     def list_disposition_ids(self, experiment_id: str) -> tuple[str, ...]:
         """List stored human-disposition identities in deterministic order."""
 
-        return self._list_ids(experiment_id, SUPERVISION_DISPOSITION_PREFIX)
+        return self._list_ids(experiment_id, SUPERVISION_DISPOSITION_PREFIX, _DISPOSITION_ID)
 
-    def _list_ids(self, experiment_id: str, prefix: str) -> tuple[str, ...]:
+    def _list_ids(
+        self,
+        experiment_id: str,
+        prefix: str,
+        pattern: re.Pattern[str],
+    ) -> tuple[str, ...]:
         suffix = ".json"
-        return tuple(
-            sorted(
-                name[len(prefix) : -len(suffix)]
-                for name in self.store.existing_artifacts(experiment_id)
-                if name.startswith(prefix) and name.endswith(suffix)
-            )
-        )
+        identities: list[str] = []
+        for name in self.store.existing_artifacts(experiment_id):
+            if not (name.startswith(prefix) and name.endswith(suffix)):
+                continue
+            identity = name[len(prefix) : -len(suffix)]
+            if not pattern.fullmatch(identity):
+                raise_research_error(
+                    ResearchRegistryError,
+                    "invalid_supervision_artifact_name",
+                    f"stored supervision artifact name is not canonical: {name}",
+                )
+            identities.append(identity)
+        return tuple(sorted(identities))
 
     @staticmethod
     def _session_name(supervision_session_id: str) -> str:
