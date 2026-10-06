@@ -31,7 +31,7 @@ Phase 4 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - `present_for_human_review` becomes `pending_human_review`;
    - `abstain` becomes a non-reviewable preserved abstention;
    - no trade-proposal or execution semantics.
-3. **Planned - Human Review Disposition (`RIC-38`)**
+3. **Implemented - Human Review Disposition (`RIC-38`)**
    - immutable human-only observational disposition;
    - supported outcomes: `observed`, `deferred`, `dismissed`, and `abstention_acknowledged`;
    - abstentions may only be acknowledged and never upgraded;
@@ -123,6 +123,21 @@ A review item:
 - maps `abstain` only to `non_reviewable_abstention`;
 - cannot reinterpret, upgrade, or weaken the stored Phase 3 verdict;
 - derives `review_item_id` from canonical content;
+- fixes `execution_authority` to `none`.
+
+## Slice 3 Contract
+
+Slice 3 introduces `HumanReviewDisposition`, `SupervisedDisposition`, and `build_supervised_disposition`.
+
+A disposition:
+
+- binds immutably to one exact `SupervisedReviewItem`;
+- re-verifies the stored Phase 3 report chain before construction;
+- accepts only `observed`, `deferred`, or `dismissed` for pending human-review items;
+- accepts only `abstention_acknowledged` for preserved abstentions;
+- records a path-safe human review reference and explicit UTC timestamp;
+- cannot express trade approval, execution approval, sizing, direction, or authority;
+- derives `disposition_id` from canonical content;
 - fixes `execution_authority` to `none`.
 
 ## Quality and Merge Gates
