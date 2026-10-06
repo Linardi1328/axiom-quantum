@@ -98,7 +98,9 @@ def build_supervised_session(
 ) -> SupervisedSession:
     """Open one explicit human-requested session over an exact stored Phase 3 report."""
 
-    canonical_report = IntelligenceReportArtifact.model_validate(report.model_dump(mode="python"))
+    canonical_report = IntelligenceReportArtifact.model_validate(
+        report.model_dump(mode="python")
+    )
     load_intelligence_report(canonical_report, registry=registry)
 
     payload: dict[str, object] = {

@@ -9,9 +9,11 @@ from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.intelligence.axiom_decision_support import DecisionSupportVerdict
 from spy_market_agent.intelligence.axiom_memory import IntelligenceMemoryRegistry
 from spy_market_agent.intelligence.axiom_reporting import (
+    IntelligenceWorkflowResult,
     intelligence_report_name,
     run_intelligence_os_workflow,
 )
+from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.supervision import (
     SUPERVISED_SESSION_SCHEMA_VERSION,
@@ -27,7 +29,11 @@ from tests.unit.test_axiom_phase3_reporting_completion import (
 )
 
 
-def _phase3_result(tmp_path: Path, *, actionable: bool = True):
+def _phase3_result(
+    tmp_path: Path,
+    *,
+    actionable: bool = True,
+) -> tuple[ResearchArtifactStore, IntelligenceWorkflowResult]:
     decision = _decision()
     store = _store(tmp_path)
     _record_phase2(store, decision)
