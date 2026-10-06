@@ -73,27 +73,30 @@ def test_memory_round_trips_complete_supervision_chain(tmp_path: Path) -> None:
     assert memory.record_review_item(review) == review.review_item_id
     assert memory.record_disposition(disposition) == disposition.disposition_id
 
-    assert memory.load_session(
-        session.experiment_id,
-        session.supervision_session_id,
-    ) == session
-    assert memory.load_review_item(
-        review.experiment_id,
-        review.review_item_id,
-    ) == review
-    assert memory.load_disposition(
-        disposition.experiment_id,
-        disposition.disposition_id,
-    ) == disposition
-    assert memory.list_session_ids(session.experiment_id) == (
-        session.supervision_session_id,
+    assert (
+        memory.load_session(
+            session.experiment_id,
+            session.supervision_session_id,
+        )
+        == session
     )
-    assert memory.list_review_item_ids(review.experiment_id) == (
-        review.review_item_id,
+    assert (
+        memory.load_review_item(
+            review.experiment_id,
+            review.review_item_id,
+        )
+        == review
     )
-    assert memory.list_disposition_ids(disposition.experiment_id) == (
-        disposition.disposition_id,
+    assert (
+        memory.load_disposition(
+            disposition.experiment_id,
+            disposition.disposition_id,
+        )
+        == disposition
     )
+    assert memory.list_session_ids(session.experiment_id) == (session.supervision_session_id,)
+    assert memory.list_review_item_ids(review.experiment_id) == (review.review_item_id,)
+    assert memory.list_disposition_ids(disposition.experiment_id) == (disposition.disposition_id,)
     assert disposition.execution_authority == "none"
 
 
