@@ -58,6 +58,8 @@ class IntelligenceReportArtifact(BaseModel):
     @field_validator("report_id")
     @classmethod
     def _report_id(cls, value: str) -> str:
+        """Require the canonical content-addressed report identifier shape."""
+
         if not _REPORT_ID.fullmatch(value):
             raise ValueError("report_id must be a canonical Axiom report identity")
         return value
@@ -65,6 +67,8 @@ class IntelligenceReportArtifact(BaseModel):
     @field_validator("assessment_id")
     @classmethod
     def _assessment_id(cls, value: str) -> str:
+        """Require an exact canonical decision-support assessment identifier."""
+
         if not _ASSESSMENT_ID.fullmatch(value):
             raise ValueError("assessment_id must be a canonical Axiom assessment identity")
         return value
@@ -72,6 +76,8 @@ class IntelligenceReportArtifact(BaseModel):
     @field_validator("evidence_id")
     @classmethod
     def _evidence_id(cls, value: str) -> str:
+        """Require an exact canonical Market Intelligence evidence identifier."""
+
         if not _EVIDENCE_ID.fullmatch(value):
             raise ValueError("evidence_id must be a canonical Axiom evidence identity")
         return value
@@ -79,6 +85,8 @@ class IntelligenceReportArtifact(BaseModel):
     @field_validator("session_id")
     @classmethod
     def _session_id(cls, value: str) -> str:
+        """Require an exact canonical Intelligence Session identifier."""
+
         if not _SESSION_ID.fullmatch(value):
             raise ValueError("session_id must be a canonical Axiom session identity")
         return value
@@ -86,6 +94,8 @@ class IntelligenceReportArtifact(BaseModel):
     @field_validator("relative_path")
     @classmethod
     def _relative_path(cls, value: str) -> str:
+        """Keep persisted report references relative and free of traversal components."""
+
         if not value.strip() or "\\" in value:
             raise ValueError("relative_path must be a nonempty POSIX-style relative path")
         path = PurePosixPath(value)
@@ -96,12 +106,16 @@ class IntelligenceReportArtifact(BaseModel):
     @field_validator("checksum")
     @classmethod
     def _checksum(cls, value: str) -> str:
+        """Require one canonical lowercase SHA-256 digest for the report bytes."""
+
         if not _SHA256.fullmatch(value):
             raise ValueError("checksum must be a lowercase SHA-256 digest")
         return value
 
     @model_validator(mode="after")
     def _identity_matches_checksum(self) -> IntelligenceReportArtifact:
+        """Bind the public report identity to the exact persisted content digest."""
+
         if self.report_id != f"aq-intel-report-{self.checksum[:24]}":
             raise ValueError("report_id must be derived from the exact report checksum")
         return self
@@ -120,6 +134,8 @@ class IntelligenceWorkflowResult(BaseModel):
 
     @model_validator(mode="after")
     def _links_are_exact(self) -> IntelligenceWorkflowResult:
+        """Reject any workflow result whose embedded parent chain is not exact."""
+
         if self.evidence.session != self.session:
             raise ValueError("workflow evidence must embed the exact workflow session")
         if self.assessment.evidence != self.evidence:
@@ -407,15 +423,21 @@ def run_intelligence_os_workflow(
 
 
 def _escape_markdown_text(value: str) -> str:
+    """Escape untrusted prose so report data cannot create Markdown structure."""
+
     return _MARKDOWN_SPECIAL.sub(r"\\\1", html.escape(value, quote=False))
 
 
 def _blockquote(value: str, *, prefix: str = "") -> list[str]:
+    """Render escaped untrusted prose inside a trusted Markdown blockquote."""
+
     escaped = _escape_markdown_text(value)
     return [f"{prefix}> {line}" if line else f"{prefix}>" for line in escaped.splitlines()]
 
 
 def _code_span(value: str) -> str:
+    """Render arbitrary scalar text inside a delimiter-safe Markdown code span."""
+
     normalized = value.replace("\r", r"\r").replace("\n", r"\n")
     longest_run = max(
         (len(match.group(0)) for match in _BACKTICK_RUN.finditer(normalized)),
