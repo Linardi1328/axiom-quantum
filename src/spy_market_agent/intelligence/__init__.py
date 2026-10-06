@@ -78,6 +78,12 @@ if TYPE_CHECKING:
         build_market_intelligence_evidence,
         intelligence_evidence_identity,
     )
+    from spy_market_agent.intelligence.axiom_memory import (
+        INTELLIGENCE_ASSESSMENT_PREFIX,
+        INTELLIGENCE_EVIDENCE_PREFIX,
+        INTELLIGENCE_SESSION_PREFIX,
+        IntelligenceMemoryRegistry,
+    )
 
 _LAZY_PHASE3_EXPORTS = {
     "DECISION_SUPPORT_ID_VERSION": "axiom_decision_support",
@@ -91,6 +97,10 @@ _LAZY_PHASE3_EXPORTS = {
     "DecisionSupportVerdict": "axiom_decision_support",
     "INTELLIGENCE_EVIDENCE_ID_VERSION": "axiom_evidence",
     "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION": "axiom_evidence",
+    "INTELLIGENCE_ASSESSMENT_PREFIX": "axiom_memory",
+    "INTELLIGENCE_EVIDENCE_PREFIX": "axiom_memory",
+    "INTELLIGENCE_SESSION_PREFIX": "axiom_memory",
+    "IntelligenceMemoryRegistry": "axiom_memory",
     "MarketIntelligenceEvidence": "axiom_evidence",
     "assess_intelligence_evidence": "axiom_decision_support",
     "build_market_intelligence_evidence": "axiom_evidence",
@@ -114,9 +124,12 @@ __all__ = [
     "DECISION_SUPPORT_ID_VERSION",
     "DECISION_SUPPORT_POLICY_ID",
     "DECISION_SUPPORT_SCHEMA_VERSION",
+    "INTELLIGENCE_ASSESSMENT_PREFIX",
     "INTELLIGENCE_EVIDENCE_ID_VERSION",
+    "INTELLIGENCE_EVIDENCE_PREFIX",
     "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION",
     "INTELLIGENCE_SESSION_ID_VERSION",
+    "INTELLIGENCE_SESSION_PREFIX",
     "INTELLIGENCE_SESSION_SCHEMA_VERSION",
     "LEGACY_SPY_INSTRUMENT_PROFILE",
     "LEGACY_SPY_SERIES_ID",
@@ -142,6 +155,7 @@ __all__ = [
     "EvidenceItem",
     "HorizonUnit",
     "InstrumentProfile",
+    "IntelligenceMemoryRegistry",
     "IntelligenceRunIdentity",
     "IntelligenceSession",
     "MarketIntelligenceEvidence",
