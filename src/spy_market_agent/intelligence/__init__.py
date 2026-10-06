@@ -57,6 +57,20 @@ from spy_market_agent.intelligence.state import (
 )
 
 if TYPE_CHECKING:
+    from spy_market_agent.intelligence.axiom_decision_support import (
+        DECISION_SUPPORT_ID_VERSION,
+        DECISION_SUPPORT_POLICY_ID,
+        DECISION_SUPPORT_SCHEMA_VERSION,
+        DecisionSupportAssessment,
+        DecisionSupportGate,
+        DecisionSupportGateResult,
+        DecisionSupportGateStatus,
+        DecisionSupportPolicy,
+        DecisionSupportVerdict,
+        assess_intelligence_evidence,
+        decision_support_assessment_identity,
+        decision_support_policy_digest,
+    )
     from spy_market_agent.intelligence.axiom_evidence import (
         INTELLIGENCE_EVIDENCE_ID_VERSION,
         INTELLIGENCE_EVIDENCE_SCHEMA_VERSION,
@@ -65,27 +79,41 @@ if TYPE_CHECKING:
         intelligence_evidence_identity,
     )
 
-_LAZY_AXIOM_EVIDENCE_EXPORTS = frozenset(
-    {
-        "INTELLIGENCE_EVIDENCE_ID_VERSION",
-        "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION",
-        "MarketIntelligenceEvidence",
-        "build_market_intelligence_evidence",
-        "intelligence_evidence_identity",
-    }
-)
+_LAZY_PHASE3_EXPORTS = {
+    "DECISION_SUPPORT_ID_VERSION": "axiom_decision_support",
+    "DECISION_SUPPORT_POLICY_ID": "axiom_decision_support",
+    "DECISION_SUPPORT_SCHEMA_VERSION": "axiom_decision_support",
+    "DecisionSupportAssessment": "axiom_decision_support",
+    "DecisionSupportGate": "axiom_decision_support",
+    "DecisionSupportGateResult": "axiom_decision_support",
+    "DecisionSupportGateStatus": "axiom_decision_support",
+    "DecisionSupportPolicy": "axiom_decision_support",
+    "DecisionSupportVerdict": "axiom_decision_support",
+    "INTELLIGENCE_EVIDENCE_ID_VERSION": "axiom_evidence",
+    "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION": "axiom_evidence",
+    "MarketIntelligenceEvidence": "axiom_evidence",
+    "assess_intelligence_evidence": "axiom_decision_support",
+    "build_market_intelligence_evidence": "axiom_evidence",
+    "decision_support_assessment_identity": "axiom_decision_support",
+    "decision_support_policy_digest": "axiom_decision_support",
+    "intelligence_evidence_identity": "axiom_evidence",
+}
 
 
 def __getattr__(name: str) -> object:
-    """Load the brief-dependent Phase 3 bridge without creating research import cycles."""
+    """Load brief/research-dependent Phase 3 exports without package import cycles."""
 
-    if name in _LAZY_AXIOM_EVIDENCE_EXPORTS:
-        module = import_module("spy_market_agent.intelligence.axiom_evidence")
-        return getattr(module, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name = _LAZY_PHASE3_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(f"spy_market_agent.intelligence.{module_name}")
+    return getattr(module, name)
 
 
 __all__ = [
+    "DECISION_SUPPORT_ID_VERSION",
+    "DECISION_SUPPORT_POLICY_ID",
+    "DECISION_SUPPORT_SCHEMA_VERSION",
     "INTELLIGENCE_EVIDENCE_ID_VERSION",
     "INTELLIGENCE_EVIDENCE_SCHEMA_VERSION",
     "INTELLIGENCE_SESSION_ID_VERSION",
@@ -105,6 +133,12 @@ __all__ = [
     "CalibrationStatus",
     "DataQualityDecision",
     "DataQualityStatus",
+    "DecisionSupportAssessment",
+    "DecisionSupportGate",
+    "DecisionSupportGateResult",
+    "DecisionSupportGateStatus",
+    "DecisionSupportPolicy",
+    "DecisionSupportVerdict",
     "EvidenceItem",
     "HorizonUnit",
     "InstrumentProfile",
@@ -122,9 +156,12 @@ __all__ = [
     "SeriesSnapshot",
     "SessionModel",
     "StateAvailability",
+    "assess_intelligence_evidence",
     "assess_scenario_actionability",
     "build_intelligence_session",
     "build_market_intelligence_evidence",
+    "decision_support_assessment_identity",
+    "decision_support_policy_digest",
     "derive_intelligence_run_identity",
     "derive_series_snapshot_id",
     "derive_spy_market_state",
