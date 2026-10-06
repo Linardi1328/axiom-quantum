@@ -36,9 +36,7 @@ class SupervisedDisposition(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-supervised-disposition-v1"] = (
-        "axiom-supervised-disposition-v1"
-    )
+    schema_version: Literal["axiom-supervised-disposition-v1"] = "axiom-supervised-disposition-v1"
     disposition_id: str
     review_item: SupervisedReviewItem
     review_item_id: str
@@ -133,9 +131,7 @@ def build_supervised_disposition(
 ) -> SupervisedDisposition:
     """Record a human disposition after re-verifying the stored Phase 3 parent chain."""
 
-    canonical_item = SupervisedReviewItem.model_validate(
-        review_item.model_dump(mode="python")
-    )
+    canonical_item = SupervisedReviewItem.model_validate(review_item.model_dump(mode="python"))
     load_intelligence_report(canonical_item.session.report, registry=registry)
     _validate_disposition(canonical_item.review_status, disposition)
     payload: dict[str, object] = {
@@ -152,6 +148,4 @@ def build_supervised_disposition(
     }
     identity_payload = payload | {"identity_version": SUPERVISED_DISPOSITION_ID_VERSION}
     disposition_id = f"aq-supervision-disposition-{sha256_json(identity_payload)[:24]}"
-    return SupervisedDisposition.model_validate(
-        {"disposition_id": disposition_id, **payload}
-    )
+    return SupervisedDisposition.model_validate({"disposition_id": disposition_id, **payload})
