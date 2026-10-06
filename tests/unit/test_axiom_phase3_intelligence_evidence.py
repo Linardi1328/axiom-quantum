@@ -282,6 +282,32 @@ def test_changed_brief_content_changes_evidence_identity() -> None:
     assert baseline.evidence_id != changed.evidence_id
 
 
+def test_evidence_owns_immutable_copy_of_preconstructed_brief_collections() -> None:
+    """Caller-held mutable aliases cannot drift the brief after its digest is bound."""
+
+    source = _brief()
+    mutable_degradation = list(source.degradation)
+    aliased = SPYMarketIntelligenceBrief(
+        schema_id=source.schema_id,
+        run_identity=source.run_identity,
+        data_quality=source.data_quality,
+        market_state=source.market_state,
+        scenarios=source.scenarios,
+        analogues=source.analogues,
+        relationships=source.relationships,
+        degradation=mutable_degradation,  # type: ignore[arg-type]
+        limitations=source.limitations,
+    )
+    evidence = build_market_intelligence_evidence(session=_session(), brief=aliased)
+    bound_digest = evidence.brief_digest
+
+    mutable_degradation.clear()
+
+    assert isinstance(evidence.brief.degradation, tuple)
+    assert evidence.brief.degradation == source.degradation
+    assert evidence.brief_digest == bound_digest == sha256_json(evidence.brief)
+
+
 def test_evidence_rejects_brief_from_another_intelligence_run() -> None:
     """A valid brief cannot be attached to a different Phase 3 point-in-time run."""
 
