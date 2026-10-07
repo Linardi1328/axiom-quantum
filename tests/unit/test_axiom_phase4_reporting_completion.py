@@ -106,16 +106,22 @@ def test_supervision_reporting_is_deterministic_and_idempotent(tmp_path: Path) -
     """Identical canonical inputs yield identical identities, bytes, and stored artifacts."""
 
     store, phase3 = _phase3_result(tmp_path, actionable=True)
-    kwargs = {
-        "report": phase3.report,
-        "invocation_id": "phase4-deterministic",
-        "disposition": HumanReviewDisposition.DEFERRED,
-        "human_review_reference": "phase4-review",
-        "recorded_at": datetime(2026, 10, 7, 8, 31, tzinfo=UTC),
-        "store": store,
-    }
-    first = reporting.run_supervised_operations_workflow(**kwargs)
-    second = reporting.run_supervised_operations_workflow(**kwargs)
+    first = reporting.run_supervised_operations_workflow(
+        report=phase3.report,
+        invocation_id="phase4-deterministic",
+        disposition=HumanReviewDisposition.DEFERRED,
+        human_review_reference="phase4-review",
+        recorded_at=datetime(2026, 10, 7, 8, 31, tzinfo=UTC),
+        store=store,
+    )
+    second = reporting.run_supervised_operations_workflow(
+        report=phase3.report,
+        invocation_id="phase4-deterministic",
+        disposition=HumanReviewDisposition.DEFERRED,
+        human_review_reference="phase4-review",
+        recorded_at=datetime(2026, 10, 7, 8, 31, tzinfo=UTC),
+        store=store,
+    )
 
     assert first == second
     assert first.report.report_id == second.report.report_id
