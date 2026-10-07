@@ -8,14 +8,23 @@ import pytest
 
 import spy_market_agent.paper_ops.session as readiness_session
 from spy_market_agent.paper_ops import build_paper_readiness_session
+from spy_market_agent.research.artifacts import ResearchArtifactStore
+from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.supervision.disposition import HumanReviewDisposition
 from spy_market_agent.supervision.memory import SupervisionMemoryRegistry
-from spy_market_agent.supervision.reporting import run_supervised_operations_workflow
+from spy_market_agent.supervision.reporting import (
+    SupervisionWorkflowResult,
+    run_supervised_operations_workflow,
+)
 from spy_market_agent.supervision.review_queue import SupervisedReviewStatus
 from unit.test_axiom_phase4_supervision_session import _phase3_result
 
 
-def _phase4_result(tmp_path: Path, *, actionable: bool):
+def _phase4_result(
+    tmp_path: Path,
+    *,
+    actionable: bool,
+) -> tuple[ResearchArtifactStore, SupervisionWorkflowResult]:
     store, phase3 = _phase3_result(tmp_path, actionable=actionable)
     result = run_supervised_operations_workflow(
         report=phase3.report,
@@ -102,7 +111,7 @@ def test_paper_readiness_session_rejects_tampered_phase4_parent(tmp_path: Path) 
         allow_replace=True,
     )
 
-    with pytest.raises(Exception, match="canonical validation"):
+    with pytest.raises(ResearchRegistryError, match="canonical validation"):
         build_paper_readiness_session(
             report=phase4.report,
             invocation_id="phase5-tampered",
