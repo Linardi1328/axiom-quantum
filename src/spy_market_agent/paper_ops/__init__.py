@@ -15,6 +15,7 @@ from spy_market_agent.paper_ops.authorization import (
     PaperSubmissionAuthorization,
     build_paper_submission_authorization,
     paper_submission_authorization_identity,
+    verify_authorization_legacy_pair,
 )
 from spy_market_agent.paper_ops.execution_session import (
     PAPER_EXECUTION_SESSION_ID_VERSION,
@@ -125,5 +126,6 @@ __all__ = [
     "paper_submission_authorization_identity",
     "render_paper_readiness_report",
     "run_paper_readiness_workflow",
+    "verify_authorization_legacy_pair",
     "write_paper_readiness_report",
 ]
