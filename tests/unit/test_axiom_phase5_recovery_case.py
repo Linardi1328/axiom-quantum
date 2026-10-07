@@ -169,7 +169,10 @@ def test_recovery_case_rejects_attempt_from_different_assessment(tmp_path: Path)
     with pytest.raises(ValueError, match="exact readiness assessment"):
         build_paper_recovery_case(
             assessment=assessment,
-            attempt=_attempt("accepted", assessment_id="aq-paper-readiness-assessment-" + ("0" * 24)),
+            attempt=_attempt(
+                "accepted",
+                assessment_id="aq-paper-readiness-assessment-" + ("0" * 24),
+            ),
             operator_reference="operator-review-wrong-assessment",
             registry=SupervisionMemoryRegistry(store),
         )
