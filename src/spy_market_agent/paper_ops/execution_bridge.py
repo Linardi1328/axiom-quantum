@@ -51,9 +51,7 @@ class PaperExecutionOutcome(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-execution-outcome-v1"] = (
-        "axiom-paper-execution-outcome-v1"
-    )
+    schema_version: Literal["axiom-paper-execution-outcome-v1"] = "axiom-paper-execution-outcome-v1"
     paper_execution_outcome_id: str
     authorization: PaperSubmissionAuthorization
     paper_submission_authorization_id: str
@@ -136,9 +134,7 @@ def _verify_authorization_lineage(
 ) -> PaperSubmissionAuthorization:
     """Reload the exact stored Phase 5 parent before any execution-side action."""
 
-    canonical = PaperSubmissionAuthorization.model_validate(
-        authorization.model_dump(mode="python")
-    )
+    canonical = PaperSubmissionAuthorization.model_validate(authorization.model_dump(mode="python"))
     stored = registry.load_assessment(
         canonical.experiment_id,
         canonical.session.assessment_id,
