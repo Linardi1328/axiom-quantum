@@ -48,7 +48,7 @@ Phase 5 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - deterministic classification of established paper-attempt states;
    - uncertain states require reconciliation by deterministic client-order reference;
    - no automatic resubmission or broker lookup.
-4. **Paper Readiness Memory (`RIC-45`)**
+4. **Implemented - Paper Readiness Memory (`RIC-45`)**
    - append-only session, assessment, and recovery-case persistence;
    - exact Phase 4 and Phase 5 parent-chain verification;
    - deterministic listings and fail-closed corruption/substitution handling.
@@ -123,6 +123,22 @@ A recovery case:
 - derives `aq-paper-recovery-case-*` identity from canonical content;
 - performs no broker lookup, order mutation, retry, cancellation, replacement, credential access, or automatic resubmission;
 - fixes execution authority to `none`.
+
+## Slice 4 Contract
+
+Slice 4 introduces `PaperReadinessMemoryRegistry`.
+
+Paper-readiness memory:
+
+- persists paper-readiness sessions, readiness assessments, and recovery cases as append-only canonical JSON records;
+- accepts a readiness session only after re-verifying its exact stored Phase 4 supervision report and complete inherited parent chain;
+- accepts an assessment only when its exact readiness-session parent is already stored and equal;
+- accepts a recovery case only when its exact readiness-assessment parent is already stored and equal;
+- re-verifies the complete stored Phase 5, Phase 4, Phase 3, and Phase 2 parent chain on every load;
+- rejects malformed records, identity substitution, parent substitution, conflicting content, malformed artifact names, and inherited-lineage tampering fail closed;
+- exposes deterministic sorted session, assessment, and recovery-case identity listings by experiment;
+- stores readiness/recovery evidence only and creates no broker, credential, order, scheduling, notification, autonomous, model-promotion, paper-execution, or live-execution capability;
+- fixes every persisted record's execution authority to `none` through its canonical contract.
 
 ## Quality and Merge Gates
 
