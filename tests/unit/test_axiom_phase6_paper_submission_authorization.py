@@ -6,12 +6,13 @@ from pathlib import Path
 import pytest
 
 import spy_market_agent.paper_ops.authorization as authorization_module
-from spy_market_agent.execution import PaperExecutionApprovalError
+from spy_market_agent.benchmark.artifacts import sha256_json
 from spy_market_agent.paper_ops import (
     PaperExecutionSession,
     PaperReadinessMemoryRegistry,
     build_paper_execution_session,
     build_paper_submission_authorization,
+    verify_authorization_legacy_pair,
 )
 from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError
@@ -47,8 +48,8 @@ def test_phase6_authorization_binds_exact_session_instruction_and_approval(
 
     assert authorization.session == session
     assert authorization.paper_execution_session_id == session.paper_execution_session_id
-    assert authorization.instruction == instruction
-    assert authorization.approval == approval
+    assert authorization.instruction_checksum == sha256_json(instruction)
+    assert authorization.approval_checksum == sha256_json(approval)
     assert authorization.signal_id == instruction.signal_id
     assert authorization.client_order_id == instruction.client_order_id
     assert authorization.instruction_fingerprint == instruction.instruction_fingerprint
@@ -57,6 +58,12 @@ def test_phase6_authorization_binds_exact_session_instruction_and_approval(
     assert authorization.use_policy == "single_use"
     assert authorization.execution_scope == "paper_only"
     assert authorization.model_connected_execution == "blocked_no_approved_paper_model"
+
+    verify_authorization_legacy_pair(
+        authorization,
+        instruction=instruction,
+        approval=approval,
+    )
 
 
 def test_phase6_authorization_is_deterministic(tmp_path: Path) -> None:
@@ -90,7 +97,7 @@ def test_phase6_authorization_rejects_mismatched_approval(tmp_path: Path) -> Non
     other_instruction = make_instruction(client_order_id="paper-order-other")
     other_approval = make_approval(other_instruction, approval_id="approval-other")
 
-    with pytest.raises(PaperExecutionApprovalError, match="approval does not match instruction"):
+    with pytest.raises(ValueError, match="approval does not match instruction"):
         build_paper_submission_authorization(
             session=session,
             instruction=instruction,
@@ -133,6 +140,48 @@ def test_phase6_authorization_identity_rejects_tamper(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="canonical authorization content"):
         authorization_module.PaperSubmissionAuthorization.model_validate(payload)
 
+
+
+def test_phase6_authorization_pair_verification_rejects_substitution(tmp_path: Path) -> None:
+    _, memory, session = _session(tmp_path)
+    instruction = make_instruction()
+    approval = make_approval(instruction)
+    authorization = build_paper_submission_authorization(
+        session=session,
+        instruction=instruction,
+        approval=approval,
+        registry=memory,
+    )
+    other_instruction = make_instruction(client_order_id="paper-order-substituted")
+    other_approval = make_approval(other_instruction, approval_id="approval-substituted")
+
+    with pytest.raises(ValueError, match="does not match authorization"):
+        verify_authorization_legacy_pair(
+            authorization,
+            instruction=other_instruction,
+            approval=other_approval,
+        )
+
+
+def test_phase6_authorization_rejects_unapproved_legacy_object(tmp_path: Path) -> None:
+    _, memory, session = _session(tmp_path)
+    instruction = make_instruction()
+
+    class Unapproved:
+        approval_id = "approval-false"
+        signal_id = instruction.signal_id
+        client_order_id = instruction.client_order_id
+        instruction_fingerprint = instruction.instruction_fingerprint
+        approved = False
+        approved_at_utc = instruction.created_at_utc
+
+    with pytest.raises(ValueError, match="explicitly approved"):
+        build_paper_submission_authorization(
+            session=session,
+            instruction=instruction,
+            approval=Unapproved(),
+            registry=memory,
+        )
 
 def test_phase6_authorization_constructor_has_no_broker_capability() -> None:
     source = getsource(authorization_module).lower()
