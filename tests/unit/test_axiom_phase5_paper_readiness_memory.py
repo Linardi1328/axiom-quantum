@@ -267,10 +267,10 @@ def test_memory_listing_rejects_prefixed_wrong_suffix(tmp_path: Path) -> None:
     """A readiness-prefixed artifact cannot evade validation by changing its suffix."""
 
     store, memory, session, _, _ = _memory_chain(tmp_path)
-    store.write_text(
+    store.write_bytes(
         session.experiment_id,
         "axiom_paper_readiness_session_not-canonical.md",
-        "unexpected",
+        b"unexpected",
         allow_replace=False,
     )
 
