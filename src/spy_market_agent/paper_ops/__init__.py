@@ -17,6 +17,15 @@ from spy_market_agent.paper_ops.authorization import (
     paper_submission_authorization_identity,
     verify_authorization_legacy_pair,
 )
+from spy_market_agent.paper_ops.execution_bridge import (
+    PAPER_EXECUTION_OUTCOME_ID_VERSION,
+    PAPER_EXECUTION_OUTCOME_SCHEMA_VERSION,
+    PaperExecutionOutcome,
+    SubmissionClaimProtocol,
+    paper_execution_outcome_identity,
+    reconcile_authorized_paper_order,
+    submit_authorized_paper_order,
+)
 from spy_market_agent.paper_ops.execution_session import (
     PAPER_EXECUTION_SESSION_ID_VERSION,
     PAPER_EXECUTION_SESSION_SCHEMA_VERSION,
@@ -76,6 +85,8 @@ from spy_market_agent.paper_ops.types import (
 
 __all__ = [
     "PAPER_ATTEMPT_RECOVERY_DISPOSITIONS",
+    "PAPER_EXECUTION_OUTCOME_ID_VERSION",
+    "PAPER_EXECUTION_OUTCOME_SCHEMA_VERSION",
     "PAPER_EXECUTION_SESSION_ID_VERSION",
     "PAPER_EXECUTION_SESSION_SCHEMA_VERSION",
     "PAPER_READINESS_ASSESSMENT_ID_VERSION",
@@ -92,6 +103,7 @@ __all__ = [
     "PAPER_SUBMISSION_AUTHORIZATION_ID_VERSION",
     "PAPER_SUBMISSION_AUTHORIZATION_SCHEMA_VERSION",
     "PHASE5_KNOWN_PAPER_ATTEMPT_STATES",
+    "PaperExecutionOutcome",
     "PaperExecutionSession",
     "PaperOperationReadiness",
     "PaperOperationalIssue",
@@ -107,6 +119,7 @@ __all__ = [
     "PaperRecoveryDisposition",
     "PaperSubmissionAuthorization",
     "Phase5PaperGateStatus",
+    "SubmissionClaimProtocol",
     "build_paper_execution_session",
     "build_paper_readiness_assessment",
     "build_paper_readiness_session",
@@ -118,14 +131,17 @@ __all__ = [
     "evaluate_phase5_model_connected_paper_gate",
     "evaluate_phase5_readiness",
     "load_paper_readiness_report",
+    "paper_execution_outcome_identity",
     "paper_execution_session_identity",
     "paper_readiness_assessment_identity",
     "paper_readiness_report_name",
     "paper_readiness_session_identity",
     "paper_recovery_case_identity",
     "paper_submission_authorization_identity",
+    "reconcile_authorized_paper_order",
     "render_paper_readiness_report",
     "run_paper_readiness_workflow",
+    "submit_authorized_paper_order",
     "verify_authorization_legacy_pair",
     "write_paper_readiness_report",
 ]
