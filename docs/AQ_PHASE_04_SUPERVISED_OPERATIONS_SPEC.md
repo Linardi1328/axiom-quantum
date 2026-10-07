@@ -36,10 +36,11 @@ Phase 4 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - supported outcomes: `observed`, `deferred`, `dismissed`, and `abstention_acknowledged`;
    - abstentions may only be acknowledged and never upgraded;
    - no execution approval semantics.
-4. **Planned - Supervision Memory (`RIC-39`)**
+4. **Implemented - Supervision Memory (`RIC-39`)**
    - append-only session, review-item, and disposition persistence;
-   - exact stored parent-chain verification;
-   - conflict, corruption, substitution, and tamper rejection.
+   - exact stored Phase 3 and Phase 4 parent-chain verification;
+   - conflict, corruption, substitution, identity mismatch, and tamper rejection;
+   - deterministic sorted identity listings by experiment.
 5. **Planned - Supervision Reporting and Completion (`RIC-40`)**
    - deterministic human-auditable supervision report;
    - append-only checksum-verified report persistence;
@@ -139,6 +140,21 @@ A disposition:
 - cannot express trade approval, execution approval, sizing, direction, or authority;
 - derives `disposition_id` from canonical content;
 - fixes `execution_authority` to `none`.
+
+## Slice 4 Contract
+
+Slice 4 introduces `SupervisionMemoryRegistry`.
+
+Supervision memory:
+
+- persists supervised sessions, review items, and human dispositions as append-only canonical JSON records;
+- accepts a session only after re-verifying its exact stored Phase 3 report, assessment, evidence, Intelligence Session, and Phase 2 validation lineage;
+- accepts a review item only when its exact supervised-session parent is already stored and equal;
+- accepts a disposition only when its exact review-item parent is already stored and equal;
+- re-verifies the complete stored Phase 4 and Phase 3 parent chain on every load;
+- rejects malformed records, identity substitution, parent substitution, conflicting content, and Phase 3 tampering fail-closed;
+- exposes deterministic sorted session, review-item, and disposition identity listings by experiment;
+- fixes every persisted record's execution authority to `none` through its canonical contract.
 
 ## Quality and Merge Gates
 
