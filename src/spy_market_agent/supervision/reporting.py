@@ -57,7 +57,7 @@ class SupervisionReportArtifact(BaseModel):
     @field_validator("relative_path")
     @classmethod
     def _relative_path(cls, value: str) -> str:
-        if not value.strip() or "\" in value:
+        if not value.strip() or "\\\\" in value:
             raise ValueError("relative_path must be a nonempty POSIX-style relative path")
         path = PurePosixPath(value)
         if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
