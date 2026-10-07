@@ -133,6 +133,9 @@ def _legacy_pair_binding(
     ):
         if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
             raise ValueError(f"legacy {field_name} must be timezone-aware")
+    assert isinstance(created_at, datetime)
+    assert isinstance(expires_at, datetime)
+    assert isinstance(approved_at, datetime)
     if not created_at < approved_at < expires_at:
         raise ValueError("legacy approval timestamp must be after creation and before expiration")
 
