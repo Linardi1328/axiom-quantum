@@ -14,8 +14,10 @@ from spy_market_agent.paper_ops import (
     PaperReadinessOutcome,
     PaperRecoveryDisposition,
 )
+from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.supervision.disposition import HumanReviewDisposition
+from spy_market_agent.supervision.reporting import SupervisionWorkflowResult
 from unit.test_axiom_phase5_paper_readiness_assessment import _readiness_parent
 
 
@@ -26,7 +28,7 @@ def _run_workflow(
     disposition: HumanReviewDisposition = HumanReviewDisposition.OBSERVED,
     attempt_status: str = "accepted",
     client_order_id: str = "phase5-report-order",
-) -> tuple[object, object, reporting.PaperReadinessWorkflowResult]:
+) -> tuple[ResearchArtifactStore, SupervisionWorkflowResult, reporting.PaperReadinessWorkflowResult]:
     """Build one exact Phase 5 end-to-end readiness/recovery outcome."""
 
     store, phase4 = _readiness_parent(
