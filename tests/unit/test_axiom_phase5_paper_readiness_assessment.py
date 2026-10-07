@@ -8,6 +8,7 @@ import pytest
 
 import spy_market_agent.paper_ops.assessment as assessment_module
 from spy_market_agent.paper_ops import (
+    PaperReadinessAssessment,
     PaperReadinessOutcome,
     Phase5PaperGateStatus,
     build_paper_readiness_assessment,
@@ -49,7 +50,7 @@ def _assessment(
     *,
     actionable: bool = True,
     disposition: HumanReviewDisposition = HumanReviewDisposition.OBSERVED,
-):
+) -> tuple[ResearchArtifactStore, SupervisionWorkflowResult, PaperReadinessAssessment]:
     """Build the canonical Slice 2 assessment and its store."""
 
     store, phase4 = _readiness_parent(
