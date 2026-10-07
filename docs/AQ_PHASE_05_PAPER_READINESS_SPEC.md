@@ -113,7 +113,7 @@ Slice 3 introduces `PaperRecoveryCase` and `build_paper_recovery_case`.
 A recovery case:
 
 - embeds one exact canonical `PaperReadinessAssessment` and re-verifies its stored Phase 4 report chain before construction;
-- classifies only exact known paper-attempt states through the established Phase 5 recovery matrix;
+- accepts only sanitized attempt evidence explicitly linked to the exact readiness assessment by `paper_readiness_assessment_id`, then classifies its exact known paper-attempt state through the established Phase 5 recovery matrix;
 - maps `reserved` and `submission_unknown` only to reconciliation-required evidence and derives the path-safe deterministic client-order reference from the sanitized persisted attempt's exact `client_order_id`; any caller-supplied cross-check must match it exactly;
 - maps `accepted`, `broker_existing_order_found`, and `reconciled` only to terminal no-action evidence;
 - maps `rejected` and `blocked` only to blocked evidence;

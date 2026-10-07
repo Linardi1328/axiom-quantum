@@ -138,6 +138,12 @@ def build_paper_recovery_case(
             "recovery case must match its exact verified readiness assessment.",
         )
 
+    attempt_assessment_id = getattr(attempt, "paper_readiness_assessment_id", None)
+    if attempt_assessment_id != canonical_assessment.assessment_id:
+        raise ValueError(
+            "sanitized paper attempt must reference the exact readiness assessment"
+        )
+
     decision = classify_paper_attempt_recovery(attempt)
     if decision.disposition is PaperRecoveryDisposition.INVALID_STATE:
         raise ValueError("attempt_status must be a known canonical paper-attempt state")
