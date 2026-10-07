@@ -141,7 +141,6 @@ def test_phase6_authorization_identity_rejects_tamper(tmp_path: Path) -> None:
         authorization_module.PaperSubmissionAuthorization.model_validate(payload)
 
 
-
 def test_phase6_authorization_pair_verification_rejects_substitution(tmp_path: Path) -> None:
     _, memory, session = _session(tmp_path)
     instruction = make_instruction()
