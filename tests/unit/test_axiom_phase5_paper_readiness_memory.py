@@ -206,6 +206,80 @@ def test_memory_listing_rejects_noncanonical_prefixed_artifacts(tmp_path: Path) 
         memory.list_session_ids(session.experiment_id)
 
 
+
+
+def test_session_loader_rejects_omitted_default_bytes(tmp_path: Path) -> None:
+    """Stored session bytes must match the complete canonical model serialization."""
+
+    store, memory, session, _, _ = _memory_chain(tmp_path)
+    memory.record_session(session)
+    payload = session.model_dump(mode="json")
+    payload.pop("execution_authority")
+    store.write_json(
+        session.experiment_id,
+        memory._session_name(session.paper_readiness_session_id),
+        payload,
+        allow_replace=True,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="bytes must be canonical"):
+        memory.load_session(session.experiment_id, session.paper_readiness_session_id)
+
+
+def test_assessment_loader_rejects_unknown_stored_fields(tmp_path: Path) -> None:
+    """Unknown assessment fields cannot be normalized away by model validation."""
+
+    store, memory, session, assessment, _ = _memory_chain(tmp_path)
+    memory.record_session(session)
+    memory.record_assessment(assessment)
+    payload = assessment.model_dump(mode="json")
+    payload["unexpected"] = True
+    store.write_json(
+        assessment.experiment_id,
+        memory._assessment_name(assessment.assessment_id),
+        payload,
+        allow_replace=True,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="bytes must be canonical"):
+        memory.load_assessment(assessment.experiment_id, assessment.assessment_id)
+
+
+def test_recovery_loader_rejects_omitted_default_bytes(tmp_path: Path) -> None:
+    """Stored recovery bytes cannot omit canonical default fields."""
+
+    store, memory, session, assessment, recovery_case = _memory_chain(tmp_path)
+    memory.record_session(session)
+    memory.record_assessment(assessment)
+    memory.record_recovery_case(recovery_case)
+    payload = recovery_case.model_dump(mode="json")
+    payload.pop("execution_authority")
+    store.write_json(
+        recovery_case.experiment_id,
+        memory._recovery_name(recovery_case.recovery_case_id),
+        payload,
+        allow_replace=True,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="bytes must be canonical"):
+        memory.load_recovery_case(recovery_case.experiment_id, recovery_case.recovery_case_id)
+
+
+def test_memory_listing_rejects_prefixed_wrong_suffix(tmp_path: Path) -> None:
+    """A readiness-prefixed artifact cannot evade validation by changing its suffix."""
+
+    store, memory, session, _, _ = _memory_chain(tmp_path)
+    store.write_text(
+        session.experiment_id,
+        "axiom_paper_readiness_session_not-canonical.md",
+        "unexpected",
+        allow_replace=False,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="artifact name is not canonical"):
+        memory.list_session_ids(session.experiment_id)
+
+
 def test_slice4_memory_has_no_operational_authority() -> None:
     """Slice 4 persistence contains no broker or unattended-operation machinery."""
 

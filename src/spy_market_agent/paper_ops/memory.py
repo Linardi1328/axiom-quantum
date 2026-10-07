@@ -4,6 +4,7 @@ import re
 
 from pydantic import ValidationError
 
+from spy_market_agent.benchmark.artifacts import canonical_json_bytes
 from spy_market_agent.paper_ops.assessment import PaperReadinessAssessment
 from spy_market_agent.paper_ops.recovery_case import PaperRecoveryCase
 from spy_market_agent.paper_ops.session import PaperReadinessSession
@@ -55,10 +56,8 @@ class PaperReadinessMemoryRegistry:
     ) -> PaperReadinessSession:
         """Load a readiness session and re-verify its complete stored Phase 4 lineage."""
 
-        payload = self.store.read_json(
-            experiment_id,
-            self._session_name(paper_readiness_session_id),
-        )
+        name = self._session_name(paper_readiness_session_id)
+        payload = self.store.read_json(experiment_id, name)
         try:
             session = PaperReadinessSession.model_validate(payload)
         except ValidationError:
@@ -66,6 +65,14 @@ class PaperReadinessMemoryRegistry:
                 ResearchRegistryError,
                 "invalid_paper_readiness_session_record",
                 "stored Phase 5 readiness session failed canonical validation.",
+            )
+        if self.store.artifact_path(experiment_id, name).read_bytes() != canonical_json_bytes(
+            session
+        ):
+            raise_research_error(
+                ResearchRegistryError,
+                "noncanonical_paper_readiness_session_record",
+                "stored Phase 5 readiness session bytes must be canonical.",
             )
         if (
             session.paper_readiness_session_id != paper_readiness_session_id
@@ -115,10 +122,8 @@ class PaperReadinessMemoryRegistry:
     ) -> PaperReadinessAssessment:
         """Load an assessment and re-verify its exact stored session and Phase 4 chain."""
 
-        payload = self.store.read_json(
-            experiment_id,
-            self._assessment_name(assessment_id),
-        )
+        name = self._assessment_name(assessment_id)
+        payload = self.store.read_json(experiment_id, name)
         try:
             assessment = PaperReadinessAssessment.model_validate(payload)
         except ValidationError:
@@ -126,6 +131,14 @@ class PaperReadinessMemoryRegistry:
                 ResearchRegistryError,
                 "invalid_paper_readiness_assessment_record",
                 "stored Phase 5 readiness assessment failed canonical validation.",
+            )
+        if self.store.artifact_path(experiment_id, name).read_bytes() != canonical_json_bytes(
+            assessment
+        ):
+            raise_research_error(
+                ResearchRegistryError,
+                "noncanonical_paper_readiness_assessment_record",
+                "stored Phase 5 readiness assessment bytes must be canonical.",
             )
         if assessment.assessment_id != assessment_id or assessment.experiment_id != experiment_id:
             raise_research_error(
@@ -178,10 +191,8 @@ class PaperReadinessMemoryRegistry:
     ) -> PaperRecoveryCase:
         """Load recovery evidence and re-verify the complete stored Phase 5/4 parent chain."""
 
-        payload = self.store.read_json(
-            experiment_id,
-            self._recovery_name(recovery_case_id),
-        )
+        name = self._recovery_name(recovery_case_id)
+        payload = self.store.read_json(experiment_id, name)
         try:
             recovery_case = PaperRecoveryCase.model_validate(payload)
         except ValidationError:
@@ -189,6 +200,14 @@ class PaperReadinessMemoryRegistry:
                 ResearchRegistryError,
                 "invalid_paper_recovery_record",
                 "stored Phase 5 recovery case failed canonical validation.",
+            )
+        if self.store.artifact_path(experiment_id, name).read_bytes() != canonical_json_bytes(
+            recovery_case
+        ):
+            raise_research_error(
+                ResearchRegistryError,
+                "noncanonical_paper_recovery_record",
+                "stored Phase 5 recovery-case bytes must be canonical.",
             )
         if (
             recovery_case.recovery_case_id != recovery_case_id
@@ -232,8 +251,14 @@ class PaperReadinessMemoryRegistry:
         suffix = ".json"
         identities: list[str] = []
         for name in self.store.existing_artifacts(experiment_id):
-            if not (name.startswith(prefix) and name.endswith(suffix)):
+            if not name.startswith(prefix):
                 continue
+            if not name.endswith(suffix):
+                raise_research_error(
+                    ResearchRegistryError,
+                    "invalid_paper_readiness_artifact_name",
+                    f"stored Phase 5 readiness artifact name is not canonical: {name}",
+                )
             identity = name[len(prefix) : -len(suffix)]
             if not pattern.fullmatch(identity):
                 raise_research_error(
