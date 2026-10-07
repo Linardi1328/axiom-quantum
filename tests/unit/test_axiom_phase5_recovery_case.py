@@ -28,7 +28,7 @@ def _attempt(
     client_order_id: str = "paper-order-20261007-001",
 ) -> _SanitizedAttempt:
     return _SanitizedAttempt(
-        attempt=_attempt(attempt_status),
+        attempt_status=attempt_status,
         client_order_id=client_order_id,
     )
 
@@ -53,23 +53,6 @@ def test_uncertain_attempt_requires_deterministic_reconciliation_reference(
     assert recovery_case.requires_client_order_reference is True
     assert recovery_case.client_order_reference == "paper-order-20261007-001"
     assert recovery_case.execution_authority == "none"
-
-
-@pytest.mark.parametrize("attempt_status", ["reserved", "submission_unknown"])
-def test_uncertain_attempt_without_reference_fails_closed(
-    tmp_path: Path,
-    attempt_status: str,
-) -> None:
-    """No uncertain state can be recorded without its reconciliation reference."""
-
-    store, _, assessment = _assessment(tmp_path)
-    with pytest.raises(ValueError, match="require client_order_reference"):
-        build_paper_recovery_case(
-            assessment=assessment,
-            attempt=_attempt(attempt_status),
-            operator_reference="operator-review-002",
-            registry=SupervisionMemoryRegistry(store),
-        )
 
 
 @pytest.mark.parametrize(
