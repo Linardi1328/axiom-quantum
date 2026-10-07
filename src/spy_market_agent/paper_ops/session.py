@@ -27,9 +27,7 @@ class PaperReadinessSession(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-readiness-session-v1"] = (
-        "axiom-paper-readiness-session-v1"
-    )
+    schema_version: Literal["axiom-paper-readiness-session-v1"] = "axiom-paper-readiness-session-v1"
     paper_readiness_session_id: str
     invocation_id: str
     invocation_source: Literal["human_requested"] = "human_requested"
