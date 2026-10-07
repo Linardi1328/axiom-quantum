@@ -94,7 +94,10 @@ class PaperExecutionOutcome(BaseModel):
         )
         if authorization != self.authorization:
             raise ValueError("authorization must be canonical")
-        if self.paper_submission_authorization_id != authorization.paper_submission_authorization_id:
+        if (
+            self.paper_submission_authorization_id
+            != authorization.paper_submission_authorization_id
+        ):
             raise ValueError("outcome must reference the exact authorization")
         if self.paper_execution_session_id != authorization.paper_execution_session_id:
             raise ValueError("outcome must preserve the exact execution session")
@@ -106,7 +109,10 @@ class PaperExecutionOutcome(BaseModel):
             raise ValueError("outcome must preserve the exact client order")
         if self.disposition in {"accepted", "reconciled"} and self.receipt_checksum is None:
             raise ValueError("successful outcomes require a broker receipt checksum")
-        if self.disposition in {"rejected", "blocked", "submission_unknown"} and not self.failure_code:
+        if (
+            self.disposition in {"rejected", "blocked", "submission_unknown"}
+            and not self.failure_code
+        ):
             raise ValueError("non-success outcomes require a failure_code")
         if self.disposition == "reconciled" and not self.reconciliation_lookup_only:
             raise ValueError("reconciled outcome must be lookup-only")
