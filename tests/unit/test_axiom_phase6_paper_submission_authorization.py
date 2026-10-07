@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import spy_market_agent.paper_ops.authorization as authorization_module
+from spy_market_agent.execution import PaperExecutionApprovalError
 from spy_market_agent.paper_ops import (
     PaperExecutionSession,
     PaperReadinessMemoryRegistry,
@@ -92,7 +93,7 @@ def test_phase6_authorization_rejects_mismatched_approval(tmp_path: Path) -> Non
     other_instruction = make_instruction(client_order_id="paper-order-other")
     other_approval = make_approval(other_instruction, approval_id="approval-other")
 
-    with pytest.raises(Exception, match="approval does not match instruction"):
+    with pytest.raises(PaperExecutionApprovalError, match="approval does not match instruction"):
         build_paper_submission_authorization(
             session=session,
             instruction=instruction,
