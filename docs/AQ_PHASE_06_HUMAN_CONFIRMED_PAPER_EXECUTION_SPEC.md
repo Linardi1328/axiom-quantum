@@ -100,8 +100,8 @@ Slice 2 introduces `PaperSubmissionAuthorization` and
 A Phase 6 paper submission authorization:
 
 - embeds one canonical Phase 6 execution session and re-verifies its exact stored Phase 5 assessment;
-- embeds one immutable legacy `PaperOrderInstruction` and one explicit approved
-  `PaperOrderApproval`;
+- binds one immutable legacy `PaperOrderInstruction` and one explicit approved
+  `PaperOrderApproval` by exact canonical checksums without importing broker/service modules;
 - preserves exact signal, client-order, instruction-fingerprint, and approval identities;
 - fixes the authorization source to `human_confirmed`;
 - fixes its use policy to `single_use` and its execution scope to `paper_only`;
