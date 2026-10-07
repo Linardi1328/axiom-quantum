@@ -11,7 +11,11 @@ from spy_market_agent.execution import (
     PaperExecutionService,
     PaperExecutionSubmissionUnknownError,
 )
-from spy_market_agent.execution.models import PaperOrderReceipt
+from spy_market_agent.execution.models import (
+    PaperOrderApproval,
+    PaperOrderInstruction,
+    PaperOrderReceipt,
+)
 from spy_market_agent.execution.protocols import PaperBrokerProtocol
 from spy_market_agent.paper_ops import (
     PaperReadinessMemoryRegistry,
@@ -82,8 +86,8 @@ def _authorization(
 ) -> tuple[
     PaperReadinessMemoryRegistry,
     PaperSubmissionAuthorization,
-    object,
-    object,
+    PaperOrderInstruction,
+    PaperOrderApproval,
 ]:
     _, memory, session = _session(tmp_path)
     instruction = make_instruction()
@@ -100,13 +104,13 @@ def _authorization(
 def test_governed_submission_claims_once_and_calls_service_once(tmp_path: Path) -> None:
     memory, authorization, instruction, approval = _authorization(tmp_path)
     claim = _ClaimRegistry()
-    service = _Service(submit_receipt=make_receipt(cast(object, instruction)))
+    service = _Service(submit_receipt=make_receipt(instruction))
     broker = FakePaperBroker()
 
     outcome = submit_authorized_paper_order(
         authorization=authorization,
-        instruction=cast(object, instruction),
-        approval=cast(object, approval),
+        instruction=instruction,
+        approval=approval,
         registry=memory,
         claim_registry=claim,
         service=cast(PaperExecutionService, service),
@@ -126,13 +130,13 @@ def test_governed_submission_claims_once_and_calls_service_once(tmp_path: Path) 
 def test_consumed_authorization_blocks_before_service_submission(tmp_path: Path) -> None:
     memory, authorization, instruction, approval = _authorization(tmp_path)
     claim = _ClaimRegistry(fail=True)
-    service = _Service(submit_receipt=make_receipt(cast(object, instruction)))
+    service = _Service(submit_receipt=make_receipt(instruction))
 
     with pytest.raises(ValueError, match="already consumed"):
         submit_authorized_paper_order(
             authorization=authorization,
-            instruction=cast(object, instruction),
-            approval=cast(object, approval),
+            instruction=instruction,
+            approval=approval,
             registry=memory,
             claim_registry=claim,
             service=cast(PaperExecutionService, service),
@@ -163,8 +167,8 @@ def test_governed_submission_records_fail_closed_outcomes(
 
     outcome = submit_authorized_paper_order(
         authorization=authorization,
-        instruction=cast(object, instruction),
-        approval=cast(object, approval),
+        instruction=instruction,
+        approval=approval,
         registry=memory,
         claim_registry=_ClaimRegistry(),
         service=cast(PaperExecutionService, service),
@@ -179,7 +183,7 @@ def test_governed_submission_records_fail_closed_outcomes(
 
 def test_reconciliation_is_lookup_only_and_never_submits(tmp_path: Path) -> None:
     memory, authorization, instruction, _ = _authorization(tmp_path)
-    receipt = make_receipt(cast(object, instruction))
+    receipt = make_receipt(instruction)
     service = _Service(reconcile_receipt=receipt)
 
     outcome = reconcile_authorized_paper_order(
