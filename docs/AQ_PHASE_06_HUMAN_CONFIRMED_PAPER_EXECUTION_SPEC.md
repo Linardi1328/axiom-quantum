@@ -112,6 +112,26 @@ Slice 2 creates no broker client and performs no broker call. It grants no sched
 recurrence, autonomous loop, model-connected execution, or live authority. Single-use
 consumption is enforced by Phase 6 audit memory before the execution bridge is invoked.
 
+## Slice 3 Contract
+
+Slice 3 introduces `PaperExecutionOutcome`, `submit_authorized_paper_order`, and
+`reconcile_authorized_paper_order`.
+
+The governed execution bridge:
+
+- re-verifies the authorization's exact stored Phase 5 lineage before execution-side action;
+- re-verifies the exact immutable legacy instruction/approval pair;
+- requires a single-use submission claim before the reviewed legacy service is invoked;
+- delegates submission exactly once to the existing `PaperExecutionService.submit_approved_order`;
+- classifies accepted, rejected, blocked, and submission-unknown outcomes deterministically;
+- reconciles only through `reconcile_by_client_order_id` using the authorization's exact
+  client-order ID;
+- never automatically resubmits and never constructs a broker client.
+
+The broker remains an injected `PaperBrokerProtocol`. Slice 3 adds no scheduler, recurrence,
+background worker, unsolicited notification, model-connected execution, live endpoint, or live
+trading path.
+
 ## Quality and Merge Gates
 
 Every Phase 6 slice must pass on its exact final pushed commit before squash merge:
