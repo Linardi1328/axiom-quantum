@@ -9,9 +9,10 @@ from typing import Any
 
 import pytest
 
+import spy_market_agent.supervision.reporting as reporting
+
 from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.research.errors import ResearchRegistryError
-from spy_market_agent.supervision import reporting
 from spy_market_agent.supervision.disposition import HumanReviewDisposition
 from spy_market_agent.supervision.memory import SupervisionMemoryRegistry
 from spy_market_agent.supervision.review_queue import SupervisedReviewStatus
