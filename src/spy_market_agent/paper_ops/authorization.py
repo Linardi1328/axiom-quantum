@@ -48,9 +48,7 @@ class PaperSubmissionAuthorization(BaseModel):
         """Require the canonical content-addressed Phase 6 authorization identity."""
 
         if not _AUTHORIZATION_ID.fullmatch(value):
-            raise ValueError(
-                "paper_submission_authorization_id must be a canonical Axiom identity"
-            )
+            raise ValueError("paper_submission_authorization_id must be a canonical Axiom identity")
         return value
 
     @model_validator(mode="after")
@@ -82,10 +80,7 @@ class PaperSubmissionAuthorization(BaseModel):
             raise ValueError("instruction_fingerprint must match the exact instruction")
         if self.approval_id != self.approval.approval_id:
             raise ValueError("approval_id must match the exact approval")
-        if (
-            self.paper_submission_authorization_id
-            != paper_submission_authorization_identity(self)
-        ):
+        if self.paper_submission_authorization_id != paper_submission_authorization_identity(self):
             raise ValueError(
                 "paper_submission_authorization_id must match canonical authorization content"
             )
@@ -114,9 +109,7 @@ def build_paper_submission_authorization(
 ) -> PaperSubmissionAuthorization:
     """Create human-only paper authority after re-verifying the exact Phase 5 parent."""
 
-    canonical_session = PaperExecutionSession.model_validate(
-        session.model_dump(mode="python")
-    )
+    canonical_session = PaperExecutionSession.model_validate(session.model_dump(mode="python"))
     stored_assessment = registry.load_assessment(
         canonical_session.experiment_id,
         canonical_session.assessment_id,
@@ -148,13 +141,8 @@ def build_paper_submission_authorization(
         "execution_scope": "paper_only",
         "model_connected_execution": "blocked_no_approved_paper_model",
     }
-    identity_payload = payload | {
-        "identity_version": PAPER_SUBMISSION_AUTHORIZATION_ID_VERSION
-    }
-    authorization_id = (
-        "aq-paper-submission-authorization-"
-        f"{sha256_json(identity_payload)[:24]}"
-    )
+    identity_payload = payload | {"identity_version": PAPER_SUBMISSION_AUTHORIZATION_ID_VERSION}
+    authorization_id = f"aq-paper-submission-authorization-{sha256_json(identity_payload)[:24]}"
     return PaperSubmissionAuthorization.model_validate(
         {
             "paper_submission_authorization_id": authorization_id,
