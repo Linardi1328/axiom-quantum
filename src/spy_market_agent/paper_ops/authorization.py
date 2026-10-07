@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from spy_market_agent.benchmark.artifacts import sha256_json
-from spy_market_agent.execution.approvals import validate_matching_approval
-from spy_market_agent.execution.models import PaperOrderApproval, PaperOrderInstruction
 from spy_market_agent.paper_ops.execution_session import PaperExecutionSession
 from spy_market_agent.paper_ops.memory import PaperReadinessMemoryRegistry
 
@@ -15,10 +14,11 @@ PAPER_SUBMISSION_AUTHORIZATION_SCHEMA_VERSION = "axiom-paper-submission-authoriz
 PAPER_SUBMISSION_AUTHORIZATION_ID_VERSION = "axiom-paper-submission-authorization-id-v1"
 
 _AUTHORIZATION_ID = re.compile(r"^aq-paper-submission-authorization-[0-9a-f]{24}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class PaperSubmissionAuthorization(BaseModel):
-    """Immutable single-use human authorization for one exact paper instruction."""
+    """Immutable single-use human authorization for one exact legacy paper pair."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -29,12 +29,12 @@ class PaperSubmissionAuthorization(BaseModel):
     session: PaperExecutionSession
     paper_execution_session_id: str
     experiment_id: str
-    instruction: PaperOrderInstruction
-    approval: PaperOrderApproval
     signal_id: str
     client_order_id: str
     instruction_fingerprint: str
+    instruction_checksum: str
     approval_id: str
+    approval_checksum: str
     authorization_source: Literal["human_confirmed"] = "human_confirmed"
     use_policy: Literal["single_use"] = "single_use"
     execution_scope: Literal["paper_only"] = "paper_only"
@@ -51,9 +51,18 @@ class PaperSubmissionAuthorization(BaseModel):
             raise ValueError("paper_submission_authorization_id must be a canonical Axiom identity")
         return value
 
+    @field_validator("instruction_checksum", "approval_checksum")
+    @classmethod
+    def _canonical_checksum(cls, value: str) -> str:
+        """Require exact SHA-256 checksums for the bound legacy objects."""
+
+        if not _SHA256.fullmatch(value):
+            raise ValueError("legacy object checksum must be canonical SHA-256")
+        return value
+
     @model_validator(mode="after")
     def _canonical_links_and_authority(self) -> PaperSubmissionAuthorization:
-        """Require exact session, instruction, approval, and blocked-model lineage."""
+        """Require exact session lineage, blocked model authority, and canonical identity."""
 
         canonical_session = PaperExecutionSession.model_validate(
             self.session.model_dump(mode="python")
@@ -66,20 +75,6 @@ class PaperSubmissionAuthorization(BaseModel):
             raise ValueError("experiment_id must match the embedded session")
         if canonical_session.assessment.gates[2].allowed:
             raise ValueError("model-connected paper execution must remain blocked")
-
-        validate_matching_approval(
-            self.instruction,
-            self.approval,
-            execution_time_utc=self.approval.approved_at_utc,
-        )
-        if self.signal_id != self.instruction.signal_id:
-            raise ValueError("signal_id must match the exact instruction")
-        if self.client_order_id != self.instruction.client_order_id:
-            raise ValueError("client_order_id must match the exact instruction")
-        if self.instruction_fingerprint != self.instruction.instruction_fingerprint:
-            raise ValueError("instruction_fingerprint must match the exact instruction")
-        if self.approval_id != self.approval.approval_id:
-            raise ValueError("approval_id must match the exact approval")
         if self.paper_submission_authorization_id != paper_submission_authorization_identity(self):
             raise ValueError(
                 "paper_submission_authorization_id must match canonical authorization content"
@@ -100,11 +95,62 @@ def paper_submission_authorization_identity(
     return f"aq-paper-submission-authorization-{sha256_json(payload)[:24]}"
 
 
+def _legacy_pair_binding(
+    instruction: object,
+    approval: object,
+) -> dict[str, object]:
+    """Validate and checksum one exact legacy instruction/approval pair without importing it."""
+
+    signal_id = getattr(instruction, "signal_id", None)
+    client_order_id = getattr(instruction, "client_order_id", None)
+    fingerprint = getattr(instruction, "instruction_fingerprint", None)
+    created_at = getattr(instruction, "created_at_utc", None)
+    expires_at = getattr(instruction, "expires_at_utc", None)
+    approval_id = getattr(approval, "approval_id", None)
+    approved = getattr(approval, "approved", None)
+    approved_at = getattr(approval, "approved_at_utc", None)
+
+    for field_name, value in (
+        ("signal_id", signal_id),
+        ("client_order_id", client_order_id),
+        ("instruction_fingerprint", fingerprint),
+        ("approval_id", approval_id),
+    ):
+        if type(value) is not str or not value:
+            raise ValueError(f"legacy {field_name} must be nonempty text")
+    if approved is not True:
+        raise ValueError("legacy paper approval must be explicitly approved")
+    if getattr(approval, "signal_id", None) != signal_id:
+        raise ValueError("approval does not match instruction signal")
+    if getattr(approval, "client_order_id", None) != client_order_id:
+        raise ValueError("approval does not match instruction client order")
+    if getattr(approval, "instruction_fingerprint", None) != fingerprint:
+        raise ValueError("approval does not match instruction fingerprint")
+    for field_name, value in (
+        ("created_at_utc", created_at),
+        ("expires_at_utc", expires_at),
+        ("approved_at_utc", approved_at),
+    ):
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"legacy {field_name} must be timezone-aware")
+    if not created_at < approved_at < expires_at:
+        raise ValueError("legacy approval timestamp must be after creation and before expiration")
+
+    return {
+        "signal_id": signal_id,
+        "client_order_id": client_order_id,
+        "instruction_fingerprint": fingerprint,
+        "instruction_checksum": sha256_json(instruction),
+        "approval_id": approval_id,
+        "approval_checksum": sha256_json(approval),
+    }
+
+
 def build_paper_submission_authorization(
     *,
     session: PaperExecutionSession,
-    instruction: PaperOrderInstruction,
-    approval: PaperOrderApproval,
+    instruction: object,
+    approval: object,
     registry: PaperReadinessMemoryRegistry,
 ) -> PaperSubmissionAuthorization:
     """Create human-only paper authority after re-verifying the exact Phase 5 parent."""
@@ -116,26 +162,16 @@ def build_paper_submission_authorization(
     )
     if stored_assessment != canonical_session.assessment:
         raise ValueError("session must preserve its exact stored Phase 5 assessment")
-
-    validate_matching_approval(
-        instruction,
-        approval,
-        execution_time_utc=approval.approved_at_utc,
-    )
     if canonical_session.assessment.gates[2].allowed:
         raise ValueError("model-connected paper execution must remain blocked")
 
+    pair = _legacy_pair_binding(instruction, approval)
     payload: dict[str, object] = {
         "schema_version": PAPER_SUBMISSION_AUTHORIZATION_SCHEMA_VERSION,
         "session": canonical_session,
         "paper_execution_session_id": canonical_session.paper_execution_session_id,
         "experiment_id": canonical_session.experiment_id,
-        "instruction": instruction,
-        "approval": approval,
-        "signal_id": instruction.signal_id,
-        "client_order_id": instruction.client_order_id,
-        "instruction_fingerprint": instruction.instruction_fingerprint,
-        "approval_id": approval.approval_id,
+        **pair,
         "authorization_source": "human_confirmed",
         "use_policy": "single_use",
         "execution_scope": "paper_only",
@@ -149,3 +185,27 @@ def build_paper_submission_authorization(
             **payload,
         }
     )
+
+
+def verify_authorization_legacy_pair(
+    authorization: PaperSubmissionAuthorization,
+    *,
+    instruction: object,
+    approval: object,
+) -> None:
+    """Fail closed unless supplied legacy objects are the exact authorized immutable pair."""
+
+    canonical = PaperSubmissionAuthorization.model_validate(
+        authorization.model_dump(mode="python")
+    )
+    pair = _legacy_pair_binding(instruction, approval)
+    for field_name in (
+        "signal_id",
+        "client_order_id",
+        "instruction_fingerprint",
+        "instruction_checksum",
+        "approval_id",
+        "approval_checksum",
+    ):
+        if getattr(canonical, field_name) != pair[field_name]:
+            raise ValueError("legacy instruction/approval pair does not match authorization")
