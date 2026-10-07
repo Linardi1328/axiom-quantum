@@ -7,11 +7,13 @@ import pytest
 
 import spy_market_agent.paper_ops.execution_session as execution_session_module
 from spy_market_agent.paper_ops import (
+    PaperReadinessAssessment,
     PaperReadinessMemoryRegistry,
     build_paper_execution_session,
     build_paper_readiness_assessment,
     build_paper_readiness_session,
 )
+from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.supervision.disposition import HumanReviewDisposition
 from unit.test_axiom_phase5_paper_readiness_assessment import _readiness_parent
@@ -21,7 +23,7 @@ def _stored_assessment(
     tmp_path: Path,
     *,
     disposition: HumanReviewDisposition = HumanReviewDisposition.OBSERVED,
-):
+) -> tuple[ResearchArtifactStore, PaperReadinessMemoryRegistry, PaperReadinessAssessment]:
     store, phase4 = _readiness_parent(
         tmp_path,
         actionable=True,
