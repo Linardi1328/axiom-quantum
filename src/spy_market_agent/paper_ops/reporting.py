@@ -43,9 +43,7 @@ class PaperReadinessReportArtifact(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-readiness-report-v1"] = (
-        "axiom-paper-readiness-report-v1"
-    )
+    schema_version: Literal["axiom-paper-readiness-report-v1"] = "axiom-paper-readiness-report-v1"
     report_id: str
     recovery_case_id: str
     assessment_id: str
@@ -122,10 +120,7 @@ class PaperReadinessWorkflowResult(BaseModel):
             raise ValueError("workflow report must reference the exact recovery case")
         if self.report.assessment_id != self.assessment.assessment_id:
             raise ValueError("workflow report must reference the exact readiness assessment")
-        if (
-            self.report.paper_readiness_session_id
-            != self.session.paper_readiness_session_id
-        ):
+        if self.report.paper_readiness_session_id != self.session.paper_readiness_session_id:
             raise ValueError("workflow report must reference the exact readiness session")
         if self.report.supervision_report_id != self.session.supervision_report_id:
             raise ValueError("workflow report must reference the exact Phase 4 report")
@@ -193,19 +188,16 @@ def render_paper_readiness_report(recovery_case: PaperRecoveryCase) -> str:
         )
     elif canonical.recovery_disposition is PaperRecoveryDisposition.NO_ACTION_TERMINAL:
         lines.append(
-            "The persisted attempt is terminal. No automatic resubmission or mutation "
-            "is allowed."
+            "The persisted attempt is terminal. No automatic resubmission or mutation is allowed."
         )
     else:
         lines.append(
-            "The persisted attempt remains blocked. No automatic retry or submission "
-            "is allowed."
+            "The persisted attempt remains blocked. No automatic retry or submission is allowed."
         )
     lines.extend(
         [
             "",
-            "P5-B broker paper submission remains blocked pending separate owner "
-            "authorization.",
+            "P5-B broker paper submission remains blocked pending separate owner authorization.",
             "P5-C model-connected paper operation remains blocked because no approved "
             "paper model exists.",
             "Execution authority remains none.",
@@ -274,9 +266,7 @@ def load_paper_readiness_report(
 ) -> str:
     """Verify checksum, path, complete lineage, and deterministic content on reload."""
 
-    canonical = PaperReadinessReportArtifact.model_validate(
-        artifact.model_dump(mode="python")
-    )
+    canonical = PaperReadinessReportArtifact.model_validate(artifact.model_dump(mode="python"))
     recovery_case = registry.load_recovery_case(
         canonical.experiment_id,
         canonical.recovery_case_id,
@@ -285,8 +275,7 @@ def load_paper_readiness_report(
     session = assessment.session
     if (
         assessment.assessment_id != canonical.assessment_id
-        or session.paper_readiness_session_id
-        != canonical.paper_readiness_session_id
+        or session.paper_readiness_session_id != canonical.paper_readiness_session_id
         or session.supervision_report_id != canonical.supervision_report_id
         or assessment.outcome != canonical.readiness_outcome
         or recovery_case.recovery_disposition != canonical.recovery_disposition

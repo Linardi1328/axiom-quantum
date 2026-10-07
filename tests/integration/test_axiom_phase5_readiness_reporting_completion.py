@@ -123,9 +123,7 @@ def test_phase5_workflow_reports_blocked_recovery(tmp_path: Path) -> None:
     _, _, result = _run_workflow(tmp_path, attempt_status="rejected")
 
     assert result.recovery_case.recovery_disposition == PaperRecoveryDisposition.BLOCKED
-    assert "No automatic retry" in reporting.render_paper_readiness_report(
-        result.recovery_case
-    )
+    assert "No automatic retry" in reporting.render_paper_readiness_report(result.recovery_case)
 
 
 def test_phase5_workflow_rejects_invalid_recovery_state(tmp_path: Path) -> None:
