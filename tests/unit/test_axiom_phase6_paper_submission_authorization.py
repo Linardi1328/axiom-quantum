@@ -56,10 +56,7 @@ def test_phase6_authorization_binds_exact_session_instruction_and_approval(
     assert authorization.authorization_source == "human_confirmed"
     assert authorization.use_policy == "single_use"
     assert authorization.execution_scope == "paper_only"
-    assert (
-        authorization.model_connected_execution
-        == "blocked_no_approved_paper_model"
-    )
+    assert authorization.model_connected_execution == "blocked_no_approved_paper_model"
 
 
 def test_phase6_authorization_is_deterministic(tmp_path: Path) -> None:
@@ -132,9 +129,7 @@ def test_phase6_authorization_identity_rejects_tamper(tmp_path: Path) -> None:
     )
 
     payload = authorization.model_dump(mode="python")
-    payload["paper_submission_authorization_id"] = (
-        "aq-paper-submission-authorization-" + "0" * 24
-    )
+    payload["paper_submission_authorization_id"] = "aq-paper-submission-authorization-" + "0" * 24
     with pytest.raises(ValueError, match="canonical authorization content"):
         authorization_module.PaperSubmissionAuthorization.model_validate(payload)
 
