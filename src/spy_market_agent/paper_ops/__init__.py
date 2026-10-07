@@ -1,5 +1,14 @@
 """Offline Phase 5 paper-operation and Axiom paper-readiness contracts."""
 
+from spy_market_agent.paper_ops.assessment import (
+    PAPER_READINESS_ASSESSMENT_ID_VERSION,
+    PAPER_READINESS_ASSESSMENT_SCHEMA_VERSION,
+    PaperReadinessAssessment,
+    PaperReadinessGateSnapshot,
+    PaperReadinessOutcome,
+    build_paper_readiness_assessment,
+    paper_readiness_assessment_identity,
+)
 from spy_market_agent.paper_ops.gates import (
     evaluate_phase5_broker_submission_gate,
     evaluate_phase5_infrastructure_gate,
@@ -28,20 +37,27 @@ from spy_market_agent.paper_ops.types import (
 
 __all__ = [
     "PAPER_ATTEMPT_RECOVERY_DISPOSITIONS",
+    "PAPER_READINESS_ASSESSMENT_ID_VERSION",
+    "PAPER_READINESS_ASSESSMENT_SCHEMA_VERSION",
     "PAPER_READINESS_SESSION_ID_VERSION",
     "PAPER_READINESS_SESSION_SCHEMA_VERSION",
     "PHASE5_KNOWN_PAPER_ATTEMPT_STATES",
     "PaperOperationReadiness",
     "PaperOperationalIssue",
+    "PaperReadinessAssessment",
+    "PaperReadinessGateSnapshot",
+    "PaperReadinessOutcome",
     "PaperReadinessSession",
     "PaperRecoveryDecision",
     "PaperRecoveryDisposition",
     "Phase5PaperGateStatus",
+    "build_paper_readiness_assessment",
     "build_paper_readiness_session",
     "classify_paper_attempt_recovery",
     "evaluate_phase5_broker_submission_gate",
     "evaluate_phase5_infrastructure_gate",
     "evaluate_phase5_model_connected_paper_gate",
     "evaluate_phase5_readiness",
+    "paper_readiness_assessment_identity",
     "paper_readiness_session_identity",
 ]

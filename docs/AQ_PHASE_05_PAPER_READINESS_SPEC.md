@@ -31,13 +31,13 @@ Phase 5 never reconstructs, substitutes, infers, weakens, or silently repairs mi
 
 ## Phase 5 Slices
 
-1. **Paper Readiness Session Contract (`RIC-42`)**
+1. **Implemented - Paper Readiness Session Contract (`RIC-42`)**
    - exact stored Phase 4 supervision report as the parent;
    - explicit `human_requested` invocation source;
    - preserved Phase 4 review status and disposition;
    - deterministic `aq-paper-readiness-session-*` identity;
    - execution authority fixed to `none`.
-2. **Paper Readiness Gate Assessment (`RIC-43`)**
+2. **Implemented - Paper Readiness Gate Assessment (`RIC-43`)**
    - exact readiness-session parent;
    - immutable P5-A/P5-B/P5-C gate snapshot;
    - observed sources may be classified only as `offline_readiness_only`;
@@ -90,6 +90,21 @@ A paper-readiness session:
 - derives `paper_readiness_session_id` from canonical content.
 
 A Phase 4 abstention remains an abstention. A Phase 4 observational disposition remains observational. Slice 1 creates no paper proposal, order intent, execution approval, broker authority, or model admission.
+
+## Slice 2 Contract
+
+Slice 2 introduces `PaperReadinessAssessment`, `PaperReadinessGateSnapshot`, and `PaperReadinessOutcome`.
+
+A readiness assessment:
+
+- embeds one exact canonical `PaperReadinessSession` and re-verifies its stored Phase 4 report chain before construction;
+- snapshots inherited P5-A, P5-B, and P5-C in that exact order;
+- requires P5-A to remain authorized, P5-B to remain blocked pending separate owner authorization, and P5-C to remain blocked with no approved paper model;
+- ignores caller-controlled metadata as an authorization source;
+- maps only a Phase 4 `pending_human_review` + `observed` disposition to `offline_readiness_only`;
+- maps deferred, dismissed, and preserved-abstention evidence to `blocked`;
+- never represents offline readiness as broker readiness, execution approval, order approval, or model admission;
+- derives `assessment_id` from canonical content and fixes execution authority to `none`.
 
 ## Quality and Merge Gates
 
