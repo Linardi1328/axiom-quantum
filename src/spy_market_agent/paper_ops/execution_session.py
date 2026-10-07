@@ -24,9 +24,7 @@ class PaperExecutionSession(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-execution-session-v1"] = (
-        "axiom-paper-execution-session-v1"
-    )
+    schema_version: Literal["axiom-paper-execution-session-v1"] = "axiom-paper-execution-session-v1"
     paper_execution_session_id: str
     invocation_id: str
     invocation_source: Literal["human_requested"] = "human_requested"
