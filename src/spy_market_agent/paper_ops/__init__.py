@@ -14,6 +14,12 @@ from spy_market_agent.paper_ops.gates import (
     evaluate_phase5_infrastructure_gate,
     evaluate_phase5_model_connected_paper_gate,
 )
+from spy_market_agent.paper_ops.memory import (
+    PAPER_READINESS_ASSESSMENT_PREFIX,
+    PAPER_READINESS_SESSION_PREFIX,
+    PAPER_RECOVERY_CASE_PREFIX,
+    PaperReadinessMemoryRegistry,
+)
 from spy_market_agent.paper_ops.policy import evaluate_phase5_readiness
 from spy_market_agent.paper_ops.recovery import (
     PAPER_ATTEMPT_RECOVERY_DISPOSITIONS,
@@ -45,16 +51,20 @@ from spy_market_agent.paper_ops.types import (
 __all__ = [
     "PAPER_ATTEMPT_RECOVERY_DISPOSITIONS",
     "PAPER_READINESS_ASSESSMENT_ID_VERSION",
+    "PAPER_READINESS_ASSESSMENT_PREFIX",
     "PAPER_READINESS_ASSESSMENT_SCHEMA_VERSION",
     "PAPER_READINESS_SESSION_ID_VERSION",
+    "PAPER_READINESS_SESSION_PREFIX",
     "PAPER_READINESS_SESSION_SCHEMA_VERSION",
     "PAPER_RECOVERY_CASE_ID_VERSION",
+    "PAPER_RECOVERY_CASE_PREFIX",
     "PAPER_RECOVERY_CASE_SCHEMA_VERSION",
     "PHASE5_KNOWN_PAPER_ATTEMPT_STATES",
     "PaperOperationReadiness",
     "PaperOperationalIssue",
     "PaperReadinessAssessment",
     "PaperReadinessGateSnapshot",
+    "PaperReadinessMemoryRegistry",
     "PaperReadinessOutcome",
     "PaperReadinessSession",
     "PaperRecoveryCase",
