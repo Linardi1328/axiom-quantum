@@ -1,6 +1,6 @@
 # Axiom Quantum Phase 4 - Supervised Operations Specification
 
-Status: Owner-authorized implementation
+Status: Final implementation candidate - complete only after all Phase 4 completion gates pass and Slice 5 is integrated into main
 
 Linear: `RIC-36` through `RIC-40`
 
@@ -41,10 +41,11 @@ Phase 4 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - exact stored Phase 3 and Phase 4 parent-chain verification;
    - conflict, corruption, substitution, identity mismatch, and tamper rejection;
    - deterministic sorted identity listings by experiment.
-5. **Planned - Supervision Reporting and Completion (`RIC-40`)**
+5. **Implemented - Supervision Reporting and Completion (`RIC-40`)**
    - deterministic human-auditable supervision report;
-   - append-only checksum-verified report persistence;
+   - append-only checksum-verified report persistence tied to exact stored Phase 4 and Phase 3 lineage;
    - explicit human-invoked end-to-end orchestration over stored Phase 3 lineage;
+   - pending-review and preserved-abstention end-to-end coverage;
    - final Phase 4 completion contract.
 
 ## Authority Boundary
@@ -155,6 +156,23 @@ Supervision memory:
 - rejects malformed records, identity substitution, parent substitution, conflicting content, and Phase 3 tampering fail-closed;
 - exposes deterministic sorted session, review-item, and disposition identity listings by experiment;
 - fixes every persisted record's execution authority to `none` through its canonical contract.
+
+## Slice 5 Contract
+
+Slice 5 introduces `SupervisionReportArtifact`, `SupervisionWorkflowResult`, and the explicit human-requested supervised-operations workflow.
+
+Supervision reporting and orchestration:
+
+- requires one exact stored Phase 3 report and rebuilds no missing evidence;
+- creates and persists the canonical Phase 4 session, review item, and observational human disposition before reporting;
+- preserves `present_for_human_review` as pending human review and preserves `abstain` as non-reviewable abstention;
+- permits an abstention only to receive `abstention_acknowledged`;
+- renders one deterministic human-auditable Markdown report from the exact stored disposition chain;
+- binds `aq-supervision-report-*` identity to the exact SHA-256 report bytes;
+- persists report bytes append-only and verifies checksum, canonical path, deterministic rerendering, and complete Phase 4/Phase 3 lineage on reload;
+- rejects report-byte tampering, stored-parent tampering, path substitution, identity substitution, and lineage substitution fail-closed;
+- remains explicitly human-invoked and contains no scheduler, daemon, recurrence, background worker, notification trigger, broker call, order construction, or execution path;
+- fixes report and workflow execution authority to `none`.
 
 ## Quality and Merge Gates
 
