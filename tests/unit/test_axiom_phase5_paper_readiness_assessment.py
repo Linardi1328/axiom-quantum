@@ -64,9 +64,13 @@ def _assessment(
         invocation_id="phase5-assessment",
         registry=registry,
     )
-    return store, phase4, build_paper_readiness_assessment(
-        session=session,
-        registry=registry,
+    return (
+        store,
+        phase4,
+        build_paper_readiness_assessment(
+            session=session,
+            registry=registry,
+        ),
     )
 
 

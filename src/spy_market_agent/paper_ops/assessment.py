@@ -88,9 +88,7 @@ class PaperReadinessAssessment(BaseModel):
         if self.phase4_disposition != canonical_session.phase4_disposition:
             raise ValueError("phase4_disposition must match the embedded session")
 
-        expected_gates = tuple(
-            _gate_snapshot(gate) for gate in evaluate_phase5_readiness()
-        )
+        expected_gates = tuple(_gate_snapshot(gate) for gate in evaluate_phase5_readiness())
         if self.gates != expected_gates:
             raise ValueError("gates must preserve the exact inherited P5-A/P5-B/P5-C posture")
         if tuple(gate.gate for gate in self.gates) != (
