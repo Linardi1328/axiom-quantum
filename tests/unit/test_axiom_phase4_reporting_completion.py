@@ -47,18 +47,27 @@ def test_supervised_workflow_round_trips_pending_human_review(tmp_path: Path) ->
     assert result.disposition.disposition == HumanReviewDisposition.OBSERVED
     assert result.execution_authority == "none"
     assert result.report.execution_authority == "none"
-    assert memory.load_session(
-        result.session.experiment_id,
-        result.session.supervision_session_id,
-    ) == result.session
-    assert memory.load_review_item(
-        result.review_item.experiment_id,
-        result.review_item.review_item_id,
-    ) == result.review_item
-    assert memory.load_disposition(
-        result.disposition.experiment_id,
-        result.disposition.disposition_id,
-    ) == result.disposition
+    assert (
+        memory.load_session(
+            result.session.experiment_id,
+            result.session.supervision_session_id,
+        )
+        == result.session
+    )
+    assert (
+        memory.load_review_item(
+            result.review_item.experiment_id,
+            result.review_item.review_item_id,
+        )
+        == result.review_item
+    )
+    assert (
+        memory.load_disposition(
+            result.disposition.experiment_id,
+            result.disposition.disposition_id,
+        )
+        == result.disposition
+    )
     content = reporting.load_supervision_report(result.report, registry=memory)
     assert content == reporting.render_supervision_report(result.disposition)
     assert "pending_human_review" in content
