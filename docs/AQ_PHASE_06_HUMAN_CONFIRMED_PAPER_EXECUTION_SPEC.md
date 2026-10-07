@@ -92,6 +92,26 @@ A Phase 6 execution session:
 
 Slice 1 creates no instruction, approval, broker client, order, execution permission, scheduler, or live capability.
 
+## Slice 2 Contract
+
+Slice 2 introduces `PaperSubmissionAuthorization` and
+`build_paper_submission_authorization`.
+
+A Phase 6 paper submission authorization:
+
+- embeds one canonical Phase 6 execution session and re-verifies its exact stored Phase 5 assessment;
+- binds one immutable legacy `PaperOrderInstruction` and one explicit approved
+  `PaperOrderApproval` by exact canonical checksums without importing broker/service modules;
+- preserves exact signal, client-order, instruction-fingerprint, and approval identities;
+- fixes the authorization source to `human_confirmed`;
+- fixes its use policy to `single_use` and its execution scope to `paper_only`;
+- preserves P5-C as `blocked_no_approved_paper_model`;
+- derives its identity from canonical content.
+
+Slice 2 creates no broker client and performs no broker call. It grants no scheduler,
+recurrence, autonomous loop, model-connected execution, or live authority. Single-use
+consumption is enforced by Phase 6 audit memory before the execution bridge is invoked.
+
 ## Quality and Merge Gates
 
 Every Phase 6 slice must pass on its exact final pushed commit before squash merge:

@@ -9,6 +9,14 @@ from spy_market_agent.paper_ops.assessment import (
     build_paper_readiness_assessment,
     paper_readiness_assessment_identity,
 )
+from spy_market_agent.paper_ops.authorization import (
+    PAPER_SUBMISSION_AUTHORIZATION_ID_VERSION,
+    PAPER_SUBMISSION_AUTHORIZATION_SCHEMA_VERSION,
+    PaperSubmissionAuthorization,
+    build_paper_submission_authorization,
+    paper_submission_authorization_identity,
+    verify_authorization_legacy_pair,
+)
 from spy_market_agent.paper_ops.execution_session import (
     PAPER_EXECUTION_SESSION_ID_VERSION,
     PAPER_EXECUTION_SESSION_SCHEMA_VERSION,
@@ -81,6 +89,8 @@ __all__ = [
     "PAPER_RECOVERY_CASE_ID_VERSION",
     "PAPER_RECOVERY_CASE_PREFIX",
     "PAPER_RECOVERY_CASE_SCHEMA_VERSION",
+    "PAPER_SUBMISSION_AUTHORIZATION_ID_VERSION",
+    "PAPER_SUBMISSION_AUTHORIZATION_SCHEMA_VERSION",
     "PHASE5_KNOWN_PAPER_ATTEMPT_STATES",
     "PaperExecutionSession",
     "PaperOperationReadiness",
@@ -95,11 +105,13 @@ __all__ = [
     "PaperRecoveryCase",
     "PaperRecoveryDecision",
     "PaperRecoveryDisposition",
+    "PaperSubmissionAuthorization",
     "Phase5PaperGateStatus",
     "build_paper_execution_session",
     "build_paper_readiness_assessment",
     "build_paper_readiness_session",
     "build_paper_recovery_case",
+    "build_paper_submission_authorization",
     "classify_paper_attempt_recovery",
     "evaluate_phase5_broker_submission_gate",
     "evaluate_phase5_infrastructure_gate",
@@ -111,7 +123,9 @@ __all__ = [
     "paper_readiness_report_name",
     "paper_readiness_session_identity",
     "paper_recovery_case_identity",
+    "paper_submission_authorization_identity",
     "render_paper_readiness_report",
     "run_paper_readiness_workflow",
+    "verify_authorization_legacy_pair",
     "write_paper_readiness_report",
 ]
