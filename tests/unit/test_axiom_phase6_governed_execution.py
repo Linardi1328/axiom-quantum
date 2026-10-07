@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-import spy_market_agent.paper_ops.execution_bridge as bridge_module
+import spy_market_agent.phase6_execution.bridge as bridge_module
 from spy_market_agent.execution import (
     PaperExecutionBrokerRejectionError,
     PaperExecutionService,
@@ -21,6 +21,8 @@ from spy_market_agent.paper_ops import (
     PaperReadinessMemoryRegistry,
     PaperSubmissionAuthorization,
     build_paper_submission_authorization,
+)
+from spy_market_agent.phase6_execution import (
     reconcile_authorized_paper_order,
     submit_authorized_paper_order,
 )
