@@ -63,7 +63,7 @@ class _Service:
         self.submit_calls = 0
         self.reconcile_calls = 0
 
-    def submit_approved_order(self, *args: object, **kwargs: object) -> PaperOrderReceipt:
+    def submit_approved_order(self, *_args: object, **_kwargs: object) -> PaperOrderReceipt:
         self.submit_calls += 1
         if self.submit_error is not None:
             raise self.submit_error
@@ -72,8 +72,8 @@ class _Service:
 
     def reconcile_by_client_order_id(
         self,
-        client_order_id: str,
-        **kwargs: object,
+        _client_order_id: str,
+        **_kwargs: object,
     ) -> PaperOrderReceipt | None:
         self.reconcile_calls += 1
         if self.reconcile_error is not None:
