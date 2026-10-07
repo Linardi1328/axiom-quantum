@@ -59,7 +59,15 @@ def test_phase6_session_binds_exact_stored_offline_readiness(tmp_path: Path) -> 
     assert session.supervision_report_id == assessment.session.supervision_report_id
     assert session.experiment_id == assessment.experiment_id
     assert session.invocation_source == "human_requested"
+    assert session.invocation_id == "phase6-owner-session"
     assert session.execution_authority == "none"
+
+    other = build_paper_execution_session(
+        assessment=assessment,
+        invocation_id="phase6-other-session",
+        registry=memory,
+    )
+    assert other.paper_execution_session_id != session.paper_execution_session_id
 
 
 def test_phase6_session_is_deterministic(tmp_path: Path) -> None:
