@@ -206,7 +206,6 @@ def test_memory_listing_rejects_noncanonical_prefixed_artifacts(tmp_path: Path) 
         memory.list_session_ids(session.experiment_id)
 
 
-
 def test_session_loader_rejects_omitted_default_bytes(tmp_path: Path) -> None:
     """Stored session bytes must match the complete canonical model serialization."""
 
