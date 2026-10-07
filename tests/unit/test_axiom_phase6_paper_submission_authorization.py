@@ -182,6 +182,7 @@ def test_phase6_authorization_rejects_unapproved_legacy_object(tmp_path: Path) -
             registry=memory,
         )
 
+
 def test_phase6_authorization_constructor_has_no_broker_capability() -> None:
     source = getsource(authorization_module).lower()
 
