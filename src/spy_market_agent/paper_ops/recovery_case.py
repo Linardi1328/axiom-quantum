@@ -117,7 +117,7 @@ def paper_recovery_case_identity(recovery_case: PaperRecoveryCase) -> str:
 def build_paper_recovery_case(
     *,
     assessment: PaperReadinessAssessment,
-    attempt_status: str,
+    attempt: object,
     operator_reference: str,
     registry: SupervisionMemoryRegistry,
     client_order_reference: str | None = None,
@@ -138,9 +138,33 @@ def build_paper_recovery_case(
             "recovery case must match its exact verified readiness assessment.",
         )
 
-    decision = classify_paper_attempt_recovery(attempt_status)
+    decision = classify_paper_attempt_recovery(attempt)
     if decision.disposition is PaperRecoveryDisposition.INVALID_STATE:
         raise ValueError("attempt_status must be a known canonical paper-attempt state")
+
+    attempt_status = decision.attempt_status
+    persisted_client_order_id = getattr(attempt, "client_order_id", None)
+    if decision.requires_client_order_id_lookup:
+        if not isinstance(persisted_client_order_id, str) or not _SAFE_REFERENCE.fullmatch(
+            persisted_client_order_id
+        ):
+            raise ValueError(
+                "uncertain paper-attempt states require a safe persisted client_order_id"
+            )
+        if (
+            client_order_reference is not None
+            and client_order_reference != persisted_client_order_id
+        ):
+            raise ValueError(
+                "client_order_reference must match the persisted attempt client_order_id"
+            )
+        canonical_client_order_reference: str | None = persisted_client_order_id
+    else:
+        if client_order_reference is not None:
+            raise ValueError(
+                "client_order_reference is only valid when reconciliation is required"
+            )
+        canonical_client_order_reference = None
 
     payload: dict[str, object] = {
         "schema_version": PAPER_RECOVERY_CASE_SCHEMA_VERSION,
@@ -153,7 +177,7 @@ def build_paper_recovery_case(
         "reason": decision.reason,
         "issues": decision.issues,
         "requires_client_order_reference": decision.requires_client_order_id_lookup,
-        "client_order_reference": client_order_reference,
+        "client_order_reference": canonical_client_order_reference,
         "operator_reference": operator_reference,
         "execution_authority": "none",
     }

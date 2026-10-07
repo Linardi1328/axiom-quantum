@@ -114,7 +114,7 @@ A recovery case:
 
 - embeds one exact canonical `PaperReadinessAssessment` and re-verifies its stored Phase 4 report chain before construction;
 - classifies only exact known paper-attempt states through the established Phase 5 recovery matrix;
-- maps `reserved` and `submission_unknown` only to reconciliation-required evidence and requires one path-safe deterministic client-order reference;
+- maps `reserved` and `submission_unknown` only to reconciliation-required evidence and derives the path-safe deterministic client-order reference from the sanitized persisted attempt's exact `client_order_id`; any caller-supplied cross-check must match it exactly;
 - maps `accepted`, `broker_existing_order_found`, and `reconciled` only to terminal no-action evidence;
 - maps `rejected` and `blocked` only to blocked evidence;
 - rejects unknown, malformed, whitespace-mutated, or otherwise noncanonical attempt states fail closed instead of repairing them;

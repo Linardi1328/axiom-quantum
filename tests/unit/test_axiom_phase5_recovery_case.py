@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from inspect import getsource
 from pathlib import Path
 
@@ -15,6 +16,23 @@ from spy_market_agent.supervision.memory import SupervisionMemoryRegistry
 from unit.test_axiom_phase5_paper_readiness_assessment import _assessment
 
 
+@dataclass(frozen=True)
+class _SanitizedAttempt:
+    attempt_status: str
+    client_order_id: str
+
+
+def _attempt(
+    attempt_status: str,
+    *,
+    client_order_id: str = "paper-order-20261007-001",
+) -> _SanitizedAttempt:
+    return _SanitizedAttempt(
+        attempt=_attempt(attempt_status),
+        client_order_id=client_order_id,
+    )
+
+
 @pytest.mark.parametrize("attempt_status", ["reserved", "submission_unknown"])
 def test_uncertain_attempt_requires_deterministic_reconciliation_reference(
     tmp_path: Path,
@@ -25,7 +43,7 @@ def test_uncertain_attempt_requires_deterministic_reconciliation_reference(
     store, _, assessment = _assessment(tmp_path)
     recovery_case = build_paper_recovery_case(
         assessment=assessment,
-        attempt_status=attempt_status,
+        attempt=_attempt(attempt_status),
         client_order_reference="paper-order-20261007-001",
         operator_reference="operator-review-001",
         registry=SupervisionMemoryRegistry(store),
@@ -48,7 +66,7 @@ def test_uncertain_attempt_without_reference_fails_closed(
     with pytest.raises(ValueError, match="require client_order_reference"):
         build_paper_recovery_case(
             assessment=assessment,
-            attempt_status=attempt_status,
+            attempt=_attempt(attempt_status),
             operator_reference="operator-review-002",
             registry=SupervisionMemoryRegistry(store),
         )
@@ -67,7 +85,7 @@ def test_terminal_attempts_are_no_action(
     store, _, assessment = _assessment(tmp_path)
     recovery_case = build_paper_recovery_case(
         assessment=assessment,
-        attempt_status=attempt_status,
+        attempt=_attempt(attempt_status),
         operator_reference="operator-review-003",
         registry=SupervisionMemoryRegistry(store),
     )
@@ -87,7 +105,7 @@ def test_rejected_or_blocked_attempts_remain_blocked(
     store, _, assessment = _assessment(tmp_path)
     recovery_case = build_paper_recovery_case(
         assessment=assessment,
-        attempt_status=attempt_status,
+        attempt=_attempt(attempt_status),
         operator_reference="operator-review-004",
         registry=SupervisionMemoryRegistry(store),
     )
@@ -107,7 +125,7 @@ def test_unknown_or_malformed_attempt_state_fails_closed(
     with pytest.raises(ValueError, match="known canonical"):
         build_paper_recovery_case(
             assessment=assessment,
-            attempt_status=attempt_status,
+            attempt=_attempt(attempt_status),
             operator_reference="operator-review-005",
             registry=SupervisionMemoryRegistry(store),
         )
@@ -120,14 +138,14 @@ def test_recovery_case_is_deterministic(tmp_path: Path) -> None:
     registry = SupervisionMemoryRegistry(store)
     first = build_paper_recovery_case(
         assessment=assessment,
-        attempt_status="submission_unknown",
+        attempt=_attempt("submission_unknown", client_order_id="paper-order-deterministic"),
         client_order_reference="paper-order-deterministic",
         operator_reference="operator-review-006",
         registry=registry,
     )
     second = build_paper_recovery_case(
         assessment=assessment,
-        attempt_status="submission_unknown",
+        attempt=_attempt("submission_unknown", client_order_id="paper-order-deterministic"),
         client_order_reference="paper-order-deterministic",
         operator_reference="operator-review-006",
         registry=registry,
@@ -144,8 +162,49 @@ def test_recovery_case_rejects_unsafe_operator_reference(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="operator_reference"):
         build_paper_recovery_case(
             assessment=assessment,
-            attempt_status="accepted",
+            attempt=_attempt("accepted"),
             operator_reference="../unsafe",
+            registry=SupervisionMemoryRegistry(store),
+        )
+
+
+def test_uncertain_attempt_derives_reference_from_persisted_attempt(tmp_path: Path) -> None:
+    """The reconciliation key is derived from the exact sanitized persisted attempt."""
+
+    store, _, assessment = _assessment(tmp_path)
+    recovery_case = build_paper_recovery_case(
+        assessment=assessment,
+        attempt=_attempt("submission_unknown", client_order_id="persisted-client-order"),
+        operator_reference="operator-review-derived",
+        registry=SupervisionMemoryRegistry(store),
+    )
+
+    assert recovery_case.client_order_reference == "persisted-client-order"
+
+
+def test_uncertain_attempt_rejects_mismatched_reference(tmp_path: Path) -> None:
+    """A caller cannot substitute a different client-order reconciliation key."""
+
+    store, _, assessment = _assessment(tmp_path)
+    with pytest.raises(ValueError, match="must match the persisted attempt"):
+        build_paper_recovery_case(
+            assessment=assessment,
+            attempt=_attempt("reserved", client_order_id="persisted-client-order"),
+            client_order_reference="different-client-order",
+            operator_reference="operator-review-mismatch",
+            registry=SupervisionMemoryRegistry(store),
+        )
+
+
+def test_uncertain_attempt_requires_persisted_client_order_id(tmp_path: Path) -> None:
+    """Uncertain state without a usable persisted client-order ID fails closed."""
+
+    store, _, assessment = _assessment(tmp_path)
+    with pytest.raises(ValueError, match="safe persisted client_order_id"):
+        build_paper_recovery_case(
+            assessment=assessment,
+            attempt=_attempt("reserved", client_order_id="../unsafe"),
+            operator_reference="operator-review-missing-id",
             registry=SupervisionMemoryRegistry(store),
         )
 
@@ -157,7 +216,7 @@ def test_recovery_case_rejects_nonreconciliation_client_reference(tmp_path: Path
     with pytest.raises(ValueError, match="only valid"):
         build_paper_recovery_case(
             assessment=assessment,
-            attempt_status="accepted",
+            attempt=_attempt("accepted"),
             client_order_reference="paper-order-not-needed",
             operator_reference="operator-review-007",
             registry=SupervisionMemoryRegistry(store),
@@ -179,7 +238,7 @@ def test_recovery_case_reverifies_stored_phase4_parent(tmp_path: Path) -> None:
     with pytest.raises(ResearchRegistryError, match="canonical validation"):
         build_paper_recovery_case(
             assessment=assessment,
-            attempt_status="accepted",
+            attempt=_attempt("accepted"),
             operator_reference="operator-review-008",
             registry=registry,
         )
@@ -191,7 +250,7 @@ def test_recovery_case_public_contract_rejects_matrix_substitution(tmp_path: Pat
     store, _, assessment = _assessment(tmp_path)
     recovery_case = build_paper_recovery_case(
         assessment=assessment,
-        attempt_status="accepted",
+        attempt=_attempt("accepted"),
         operator_reference="operator-review-009",
         registry=SupervisionMemoryRegistry(store),
     )
