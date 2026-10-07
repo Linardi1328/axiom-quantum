@@ -100,9 +100,7 @@ class PaperRecoveryCase(BaseModel):
         if decision.requires_client_order_id_lookup and self.client_order_reference is None:
             raise ValueError("uncertain paper-attempt states require client_order_reference")
         if not decision.requires_client_order_id_lookup and self.client_order_reference is not None:
-            raise ValueError(
-                "client_order_reference is only valid when reconciliation is required"
-            )
+            raise ValueError("client_order_reference is only valid when reconciliation is required")
         if self.recovery_case_id != paper_recovery_case_identity(self):
             raise ValueError("recovery_case_id must match canonical recovery-case content")
         return self
@@ -161,6 +159,4 @@ def build_paper_recovery_case(
     }
     identity_payload = payload | {"identity_version": PAPER_RECOVERY_CASE_ID_VERSION}
     recovery_case_id = f"aq-paper-recovery-case-{sha256_json(identity_payload)[:24]}"
-    return PaperRecoveryCase.model_validate(
-        {"recovery_case_id": recovery_case_id, **payload}
-    )
+    return PaperRecoveryCase.model_validate({"recovery_case_id": recovery_case_id, **payload})
