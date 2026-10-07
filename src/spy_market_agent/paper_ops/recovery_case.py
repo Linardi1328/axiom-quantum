@@ -161,9 +161,7 @@ def build_paper_recovery_case(
         canonical_client_order_reference: str | None = persisted_client_order_id
     else:
         if client_order_reference is not None:
-            raise ValueError(
-                "client_order_reference is only valid when reconciliation is required"
-            )
+            raise ValueError("client_order_reference is only valid when reconciliation is required")
         canonical_client_order_reference = None
 
     payload: dict[str, object] = {
