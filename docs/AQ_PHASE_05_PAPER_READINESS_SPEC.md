@@ -43,7 +43,7 @@ Phase 5 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - observed sources may be classified only as `offline_readiness_only`;
    - deferred, dismissed, and preserved abstention sources remain blocked;
    - no broker-readiness or execution-approval semantics.
-3. **Fail-Closed Recovery Case (`RIC-44`)**
+3. **Implemented - Fail-Closed Recovery Case (`RIC-44`)**
    - exact readiness-assessment parent;
    - deterministic classification of established paper-attempt states;
    - uncertain states require reconciliation by deterministic client-order reference;
@@ -105,6 +105,24 @@ A readiness assessment:
 - maps deferred, dismissed, and preserved-abstention evidence to `blocked`;
 - never represents offline readiness as broker readiness, execution approval, order approval, or model admission;
 - derives `assessment_id` from canonical content and fixes execution authority to `none`.
+
+## Slice 3 Contract
+
+Slice 3 introduces `PaperRecoveryCase` and `build_paper_recovery_case`.
+
+A recovery case:
+
+- embeds one exact canonical `PaperReadinessAssessment` and re-verifies its stored Phase 4 report chain before construction;
+- classifies only exact known paper-attempt states through the established Phase 5 recovery matrix;
+- maps `reserved` and `submission_unknown` only to reconciliation-required evidence and requires one path-safe deterministic client-order reference;
+- maps `accepted`, `broker_existing_order_found`, and `reconciled` only to terminal no-action evidence;
+- maps `rejected` and `blocked` only to blocked evidence;
+- rejects unknown, malformed, whitespace-mutated, or otherwise noncanonical attempt states fail closed instead of repairing them;
+- records one path-safe operator reference;
+- rejects client-order references on states that do not require reconciliation;
+- derives `aq-paper-recovery-case-*` identity from canonical content;
+- performs no broker lookup, order mutation, retry, cancellation, replacement, credential access, or automatic resubmission;
+- fixes execution authority to `none`.
 
 ## Quality and Merge Gates
 
