@@ -54,7 +54,7 @@ class PaperSubmissionAuthorization(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _canonical_links_and_authority(self) -> "PaperSubmissionAuthorization":
+    def _canonical_links_and_authority(self) -> PaperSubmissionAuthorization:
         """Require exact session, instruction, approval, and blocked-model lineage."""
 
         canonical_session = PaperExecutionSession.model_validate(
