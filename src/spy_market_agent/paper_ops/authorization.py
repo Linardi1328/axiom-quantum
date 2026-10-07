@@ -195,9 +195,7 @@ def verify_authorization_legacy_pair(
 ) -> None:
     """Fail closed unless supplied legacy objects are the exact authorized immutable pair."""
 
-    canonical = PaperSubmissionAuthorization.model_validate(
-        authorization.model_dump(mode="python")
-    )
+    canonical = PaperSubmissionAuthorization.model_validate(authorization.model_dump(mode="python"))
     pair = _legacy_pair_binding(instruction, approval)
     for field_name in (
         "signal_id",
