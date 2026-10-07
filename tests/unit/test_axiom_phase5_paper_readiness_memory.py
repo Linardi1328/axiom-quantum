@@ -64,17 +64,13 @@ def test_memory_round_trips_complete_readiness_chain(tmp_path: Path) -> None:
     assert memory.record_assessment(assessment) == assessment.assessment_id
     assert memory.record_recovery_case(recovery_case) == recovery_case.recovery_case_id
 
-    assert (
-        memory.load_session(session.experiment_id, session.paper_readiness_session_id) == session
-    )
+    assert memory.load_session(session.experiment_id, session.paper_readiness_session_id) == session
     assert memory.load_assessment(assessment.experiment_id, assessment.assessment_id) == assessment
     assert (
         memory.load_recovery_case(recovery_case.experiment_id, recovery_case.recovery_case_id)
         == recovery_case
     )
-    assert memory.list_session_ids(session.experiment_id) == (
-        session.paper_readiness_session_id,
-    )
+    assert memory.list_session_ids(session.experiment_id) == (session.paper_readiness_session_id,)
     assert memory.list_assessment_ids(assessment.experiment_id) == (assessment.assessment_id,)
     assert memory.list_recovery_case_ids(recovery_case.experiment_id) == (
         recovery_case.recovery_case_id,
