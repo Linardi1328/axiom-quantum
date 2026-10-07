@@ -1,6 +1,6 @@
 # Axiom Quantum Phase 5 - Paper Readiness and Recovery Specification
 
-Status: Owner-authorized implementation
+Status: Final implementation candidate - complete only after all Phase 5 completion gates pass and Slice 5 is integrated into main
 
 Linear: `RIC-42` through `RIC-46`
 
@@ -52,9 +52,12 @@ Phase 5 never reconstructs, substitutes, infers, weakens, or silently repairs mi
    - append-only session, assessment, and recovery-case persistence;
    - exact Phase 4 and Phase 5 parent-chain verification;
    - deterministic listings and fail-closed corruption/substitution handling.
-5. **Readiness Reporting and Completion (`RIC-46`)**
-   - deterministic checksum-bound human-auditable report;
-   - explicit human-invoked end-to-end orchestration;
+5. **Implemented - Readiness Reporting and Completion (`RIC-46`)**
+   - deterministic checksum-bound human-auditable readiness/recovery report;
+   - append-only report persistence tied to exact stored Phase 5 and Phase 4 lineage;
+   - explicit human-invoked end-to-end orchestration over stored Phase 4 evidence;
+   - offline-readiness-only, blocked-supervision, reconciliation-required, terminal,
+     blocked-recovery, and invalid-state coverage;
    - completion contract and merged-main verification.
 
 ## Authority Boundary
@@ -139,6 +142,30 @@ Paper-readiness memory:
 - exposes deterministic sorted session, assessment, and recovery-case identity listings by experiment;
 - stores readiness/recovery evidence only and creates no broker, credential, order, scheduling, notification, autonomous, model-promotion, paper-execution, or live-execution capability;
 - fixes every persisted record's execution authority to `none` through its canonical contract.
+
+## Slice 5 Contract
+
+Slice 5 introduces `PaperReadinessReportArtifact`, `PaperReadinessWorkflowResult`,
+and the explicit human-requested offline readiness/recovery workflow.
+
+Readiness reporting and orchestration:
+
+- requires one exact stored Phase 4 supervision report and reconstructs no missing evidence;
+- creates and persists the canonical readiness session, gate assessment, and offline
+  recovery case before reporting;
+- accepts caller-supplied sanitized persisted attempt status/reference evidence only;
+- preserves the inherited P5-A/P5-B/P5-C gate posture without self-authorization;
+- renders one deterministic human-auditable Markdown report from the exact stored
+  recovery chain;
+- binds `aq-paper-readiness-report-*` identity to the exact SHA-256 report bytes;
+- persists report bytes append-only and verifies checksum, canonical path,
+  deterministic rerendering, and complete Phase 5/4/3/2 lineage on reload;
+- rejects report-byte tampering, stored-parent tampering, path substitution, identity
+  substitution, invalid attempt state, and lineage substitution fail closed;
+- performs no broker lookup, credential read, order construction/submission,
+  cancellation/replacement, retry, automatic resubmission, scheduling, recurrence,
+  notification, model promotion, paper execution, or live execution;
+- fixes report and workflow execution authority to `none`.
 
 ## Quality and Merge Gates
 
