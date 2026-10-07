@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from inspect import getsource
 from pathlib import Path
 
@@ -8,16 +7,20 @@ import pytest
 
 import spy_market_agent.paper_ops.authorization as authorization_module
 from spy_market_agent.paper_ops import (
+    PaperExecutionSession,
     PaperReadinessMemoryRegistry,
     build_paper_execution_session,
     build_paper_submission_authorization,
 )
+from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.errors import ResearchRegistryError
 from unit.phase8_helpers import make_approval, make_instruction
 from unit.test_axiom_phase6_paper_execution_session import _stored_assessment
 
 
-def _session(tmp_path: Path):
+def _session(
+    tmp_path: Path,
+) -> tuple[ResearchArtifactStore, PaperReadinessMemoryRegistry, PaperExecutionSession]:
     store, memory, assessment = _stored_assessment(tmp_path)
     session = build_paper_execution_session(
         assessment=assessment,
