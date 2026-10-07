@@ -28,7 +28,11 @@ def _run_workflow(
     disposition: HumanReviewDisposition = HumanReviewDisposition.OBSERVED,
     attempt_status: str = "accepted",
     client_order_id: str = "phase5-report-order",
-) -> tuple[ResearchArtifactStore, SupervisionWorkflowResult, reporting.PaperReadinessWorkflowResult]:
+) -> tuple[
+    ResearchArtifactStore,
+    SupervisionWorkflowResult,
+    reporting.PaperReadinessWorkflowResult,
+]:
     """Build one exact Phase 5 end-to-end readiness/recovery outcome."""
 
     store, phase4 = _readiness_parent(
