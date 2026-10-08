@@ -1,11 +1,11 @@
+"""Phase 7 paper-validation evidence, separate from execution authority."""
+
 from spy_market_agent.phase7_validation.assessment import (
     Phase7OperationalAssessment,
     build_phase7_operational_assessment,
     phase7_operational_assessment_identity,
     replay_phase7_operational_assessment,
 )
-"""Phase 7 paper-validation evidence, separate from execution authority."""
-
 from spy_market_agent.phase7_validation.memory import Phase7ValidationMemoryRegistry
 from spy_market_agent.phase7_validation.pilot import (
     Phase7PaperPilotObservation,
