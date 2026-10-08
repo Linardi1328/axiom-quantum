@@ -75,9 +75,7 @@ class Phase7ValidationMemoryRegistry:
         return canonical.safety_evidence_id
 
     def load_safety(self, experiment_id: str, evidence_id: str) -> Phase7SafetyEvidence:
-        evidence = self._load(
-            experiment_id, self._safety_name(evidence_id), Phase7SafetyEvidence
-        )
+        evidence = self._load(experiment_id, self._safety_name(evidence_id), Phase7SafetyEvidence)
         if evidence.experiment_id != experiment_id or evidence.safety_evidence_id != evidence_id:
             raise ValueError("stored safety identity mismatch")
         if self.load_session(experiment_id, evidence.validation_session_id) != evidence.session:
@@ -112,9 +110,9 @@ class Phase7ValidationMemoryRegistry:
         ):
             raise ValueError("stored pilot identity mismatch")
         self._verify_pilot_lineage(observation)
-        if self.store.read_json(
-            experiment_id, self._day_name(observation.session)
-        ) != {"pilot_observation_id": observation_id}:
+        if self.store.read_json(experiment_id, self._day_name(observation.session)) != {
+            "pilot_observation_id": observation_id
+        }:
             raise ValueError("stored paper pilot date guard mismatch")
         return observation
 
@@ -150,16 +148,15 @@ class Phase7ValidationMemoryRegistry:
         )
 
     def _verify_parent(self, session: Phase7ValidationSession) -> None:
-        parent = self.readiness_memory.load_assessment(
-            session.experiment_id, session.assessment_id
-        )
+        parent = self.readiness_memory.load_assessment(session.experiment_id, session.assessment_id)
         if parent != session.assessment:
             raise ValueError("Phase 7 parent must match exact stored Phase 5 assessment")
 
     def _verify_pilot_lineage(self, observation: Phase7PaperPilotObservation) -> None:
-        if self.load_session(
-            observation.experiment_id, observation.validation_session_id
-        ) != observation.session:
+        if (
+            self.load_session(observation.experiment_id, observation.validation_session_id)
+            != observation.session
+        ):
             raise ValueError("pilot record must link exact stored Phase 7 session")
         if observation.outcome is not None:
             stored = self.execution_memory.load_outcome(
