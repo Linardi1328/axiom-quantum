@@ -264,7 +264,7 @@ def test_phase6_authorization_consumption_is_atomic_under_concurrency(tmp_path: 
         try:
             memory.claim_submission(authorization)
         except ResearchRegistryError as exc:
-            return exc.code
+            return exc.codes[0]
         return "success"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
