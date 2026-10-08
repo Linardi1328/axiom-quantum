@@ -72,9 +72,7 @@ class Phase7SafetyEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-validation-safety-v1"] = (
-        "axiom-paper-validation-safety-v1"
-    )
+    schema_version: Literal["axiom-paper-validation-safety-v1"] = "axiom-paper-validation-safety-v1"
     safety_evidence_id: str
     session: Phase7ValidationSession
     validation_session_id: str
