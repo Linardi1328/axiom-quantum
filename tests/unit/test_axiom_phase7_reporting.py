@@ -38,9 +38,7 @@ def _setup(tmp_path: Path) -> tuple[Phase7ValidationMemoryRegistry, PaperReadine
     session, readiness, probes = _fixture(tmp_path)
     registry = Phase7ValidationMemoryRegistry(readiness.store)
     registry.record_session(session)
-    evidence = build_phase7_safety_evidence(
-        session=session, probes=probes, registry=readiness
-    )
+    evidence = build_phase7_safety_evidence(session=session, probes=probes, registry=readiness)
     registry.record_safety(evidence)
     return registry, session.assessment
 
@@ -115,9 +113,10 @@ def test_report_is_checksum_verified_and_stable_after_new_data(tmp_path: Path) -
 
     _paper_abstention(registry, assessment, day=date(2026, 10, 9), index=2)
     assert load_phase7_validation_report(artifact, registry=registry) == content
-    assert replay_phase7_operational_assessment(
-        snapshot=artifact.assessment, registry=registry
-    ) == artifact.assessment
+    assert (
+        replay_phase7_operational_assessment(snapshot=artifact.assessment, registry=registry)
+        == artifact.assessment
+    )
     newer = write_phase7_validation_report(
         experiment_id=assessment.experiment_id,
         registry=registry,
@@ -206,9 +205,7 @@ def test_twenty_attested_sessions_can_only_trigger_owner_audit_not_trading(
     assert assessment_result.accepted_order_count == 1
     assert assessment_result.ready_for_owner_audit
     assert assessment_result.operational_verdict == "no_go"
-    assert assessment_result.evidence_provenance == (
-        "operator_attested_not_independently_verified"
-    )
+    assert assessment_result.evidence_provenance == ("operator_attested_not_independently_verified")
     report = write_phase7_validation_report(
         experiment_id=assessment.experiment_id,
         registry=registry,
