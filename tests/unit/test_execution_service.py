@@ -130,6 +130,9 @@ def test_missing_credentials_block_explicit_submission(tmp_path: Path) -> None:
             enable_paper_execution=True,
             dry_run=False,
             paper_execution_kill_switch=False,
+            alpaca_api_key=None,
+            alpaca_secret_key=None,
+            _env_file=None,
         ),
         repository=repository,
     )
