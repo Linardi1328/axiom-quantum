@@ -633,3 +633,10 @@ The repository uses:
 The current deterministic tests use synthetic or in-memory data. No committed real SPY
 dataset, generated SQLite database, private screenshot, account identifier, or credential is
 required.
+
+
+## Axiom Quantum Phase 7 — Supervised Paper-Trading Validation
+
+The Axiom-specific Phase 7 module provides human-requested validation sessions, six synthetic safety fixtures, explicit operator-attested paper pilot observations, append-only lineage-checked memory, an XNYS session-counting operational assessment, and a deterministic checksum-verified audit report. See [Phase 7 governing specification](docs/AQ_PHASE_07_SUPERVISED_PAPER_VALIDATION_SPEC.md) and [completion contract](docs/AQ_PHASE_07_COMPLETION_SPEC.md).
+
+**No automatic trading permission follows from these features.** Software delivery and owner-run real Alpaca paper-broker validation are separate. CI tests use fakes and do not constitute broker-authenticated sessions; operator-provided receipt digests are not independently verified. Phase 7's operational verdict is permanently `NO_GO` pending a separate owner-reviewed pilot and formal go/no-go. No approved paper model exists, and no unattended or live trading is authorized.
