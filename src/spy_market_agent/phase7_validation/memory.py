@@ -199,6 +199,15 @@ class Phase7ValidationMemoryRegistry:
         pattern: re.Pattern[str],
     ) -> tuple[str, ...]:
         ids: list[str] = []
+        directory = self.store.experiment_dir(experiment_id)
+        if directory.exists():
+            if directory.is_symlink() or not directory.is_dir():
+                raise ValueError("invalid Phase 7 experiment directory")
+            for artifact in directory.iterdir():
+                if artifact.name.startswith(prefix) and (
+                    artifact.is_symlink() or not artifact.is_file()
+                ):
+                    raise ValueError("unsafe Phase 7 evidence artifact")
         for name in self.store.existing_artifacts(experiment_id):
             if not name.startswith(prefix):
                 continue
