@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+import spy_market_agent.phase6_execution.reporting as reporting_module
 from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.execution import (
     PaperExecutionBrokerRejectionError,
@@ -403,6 +404,205 @@ def test_phase6_workflow_result_rejects_broken_links(tmp_path: Path) -> None:
             outcomes=result.outcomes,
             report=wrong_disposition,
         )
+
+
+
+def test_phase6_workflow_result_rejects_foreign_outcome_and_report_links(
+    tmp_path: Path,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    first = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-workflow-first",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+
+    second_store, second_readiness, second_session = _session(tmp_path / "foreign")
+    second_memory = PaperExecutionMemoryRegistry(second_store)
+    second_instruction = make_instruction(
+        signal_id="signal-workflow-foreign",
+        client_order_id="paper-order-workflow-foreign",
+    )
+    second = run_paper_submission_workflow(
+        assessment=second_session.assessment,
+        invocation_id="phase6-workflow-foreign",
+        instruction=second_instruction,
+        approval=make_approval(second_instruction, approval_id="approval-workflow-foreign"),
+        readiness_registry=second_readiness,
+        execution_registry=second_memory,
+        service=cast(
+            PaperExecutionService,
+            _Service(submit_receipt=make_receipt(second_instruction)),
+        ),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+
+    with pytest.raises(ValueError, match="exact authorization"):
+        PaperExecutionWorkflowResult(
+            session=first.session,
+            authorization=first.authorization,
+            outcomes=second.outcomes,
+            report=second.report,
+        )
+    with pytest.raises(ValueError, match="exact outcome chain"):
+        PaperExecutionWorkflowResult(
+            session=first.session,
+            authorization=first.authorization,
+            outcomes=first.outcomes,
+            report=second.report,
+        )
+
+    mismatched_disposition = PaperExecutionReportArtifact.model_validate(
+        first.report.model_dump(mode="python") | {"final_disposition": "blocked"}
+    )
+    with pytest.raises(ValueError, match="disposition"):
+        PaperExecutionWorkflowResult(
+            session=first.session,
+            authorization=first.authorization,
+            outcomes=first.outcomes,
+            report=mismatched_disposition,
+        )
+
+
+def test_phase6_reporting_rejects_invalid_ordered_outcome_chains(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-invalid-chain",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+
+    monkeypatch.setattr(memory, "list_outcome_ids_for_authorization", lambda _authorization: ())
+    with pytest.raises(ResearchRegistryError, match="exactly one submission"):
+        reporting_module._ordered_outcomes(result.authorization, registry=memory)
+
+    accepted = result.outcomes[-1]
+    reconciliation = accepted.model_copy(update={"reconciliation_lookup_only": True})
+    monkeypatch.setattr(
+        memory,
+        "list_outcome_ids_for_authorization",
+        lambda _authorization: ("submission", "reconciliation"),
+    )
+    monkeypatch.setattr(
+        memory,
+        "load_outcome",
+        lambda _experiment_id, outcome_id: (
+            accepted if outcome_id == "submission" else reconciliation
+        ),
+    )
+    with pytest.raises(ResearchRegistryError, match="submission_unknown parent"):
+        reporting_module._ordered_outcomes(result.authorization, registry=memory)
+
+
+def test_phase6_report_write_detects_reload_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-reload-mismatch",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    monkeypatch.setattr(reporting_module, "load_paper_execution_report", lambda *_args, **_kwargs: "mismatch")
+
+    with pytest.raises(ResearchRegistryError, match="differs after deterministic reload"):
+        write_paper_execution_report(result.outcomes[-1], registry=memory)
+
+
+def test_phase6_report_load_rejects_foreign_outcome_reference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-foreign-outcome",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    foreign = result.outcomes[-1].model_copy(
+        update={
+            "paper_submission_authorization_id": (
+                "aq-paper-submission-authorization-000000000000000000000000"
+            )
+        }
+    )
+    monkeypatch.setattr(memory, "load_outcome", lambda *_args, **_kwargs: foreign)
+
+    with pytest.raises(ResearchRegistryError, match="exact authorization"):
+        load_paper_execution_report(result.report, registry=memory)
+
+
+def test_phase6_report_load_rejects_render_io_and_content_mismatches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-load-errors",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            reporting_module,
+            "render_paper_execution_report",
+            lambda *_args, **_kwargs: "different deterministic rendering\n",
+        )
+        with pytest.raises(ResearchRegistryError, match="artifact checksum"):
+            load_paper_execution_report(result.report, registry=memory)
+
+    def fail_read_text(_path: Path, *_args: object, **_kwargs: object) -> str:
+        raise OSError("synthetic read failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", fail_read_text)
+        with pytest.raises(ResearchRegistryError, match="could not be loaded"):
+            load_paper_execution_report(result.report, registry=memory)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", lambda *_args, **_kwargs: "different stored content\n")
+        with pytest.raises(ResearchRegistryError, match="content does not match"):
+            load_paper_execution_report(result.report, registry=memory)
 
 
 def test_phase6_render_rejects_empty_or_foreign_outcome_chain(tmp_path: Path) -> None:
