@@ -83,7 +83,9 @@ class PaperExecutionReportArtifact(BaseModel):
             raise ValueError("paper_submission_authorization_id must be canonical")
         if not _SESSION_ID.fullmatch(self.paper_execution_session_id):
             raise ValueError("paper_execution_session_id must be canonical")
-        if not self.outcome_ids or any(\n            not _OUTCOME_ID.fullmatch(item) for item in self.outcome_ids\n        ):
+        if not self.outcome_ids or any(
+            not _OUTCOME_ID.fullmatch(item) for item in self.outcome_ids
+        ):
             raise ValueError("outcome_ids must contain canonical Phase 6 outcome identities")
         if len(set(self.outcome_ids)) != len(self.outcome_ids):
             raise ValueError("outcome_ids must not contain duplicates")
@@ -187,7 +189,10 @@ def render_paper_execution_report(
         f"- Invocation source: {session.invocation_source}",
         f"- Phase 5 readiness assessment ID: {assessment.assessment_id}",
         f"- Readiness outcome: {assessment.outcome.value}",
-        (\n            "- Submission authorization ID: "\n            f"{canonical_authorization.paper_submission_authorization_id}"\n        ),
+        (
+            "- Submission authorization ID: "
+            f"{canonical_authorization.paper_submission_authorization_id}"
+        ),
         f"- Authorization source: {canonical_authorization.authorization_source}",
         f"- Authorization use policy: {canonical_authorization.use_policy}",
         f"- Signal ID: {canonical_authorization.signal_id}",
@@ -218,10 +223,19 @@ def render_paper_execution_report(
             "## Safety posture",
             "",
             "- Operation remains paper-only.",
-            (\n                "- Model-connected paper execution remains blocked because no approved "\n                "paper model exists."\n            ),
-            (\n                "- No scheduler, recurrence, unattended execution, automatic resubmission, "\n                "or live trading is authorized."\n            ),
             (
-                (\n                    "- Reconciliation was lookup-only by client_order_id and did not submit "\n                    "a new order."\n                )
+                "- Model-connected paper execution remains blocked because no approved "
+                "paper model exists."
+            ),
+            (
+                "- No scheduler, recurrence, unattended execution, automatic resubmission, "
+                "or live trading is authorized."
+            ),
+            (
+                (
+                    "- Reconciliation was lookup-only by client_order_id and did not submit "
+                    "a new order."
+                )
                 if final.reconciliation_lookup_only
                 else "- This report creates no additional execution authority."
             ),
