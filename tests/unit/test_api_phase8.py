@@ -22,7 +22,12 @@ def test_paper_trading_status_route_is_read_only_and_uses_local_ledger(
 ) -> None:
     database_path = tmp_path / "phase8.sqlite3"
     initialize_database(database_path)
-    client = TestClient(create_app(database_path=str(database_path), settings=Settings()))
+    client = TestClient(
+        create_app(
+            database_path=str(database_path),
+            settings=Settings(alpaca_api_key=None, alpaca_secret_key=None),
+        )
+    )
 
     response = client.get("/api/v1/paper-trading/status")
 

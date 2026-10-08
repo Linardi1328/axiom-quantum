@@ -34,7 +34,7 @@ def test_regular_market_hours_requirement_cannot_be_disabled(
 
 
 def test_missing_credentials_are_allowed_but_displayed_only_as_presence_flags() -> None:
-    settings = Settings()
+    settings = Settings(alpaca_api_key=None, alpaca_secret_key=None)
     displayed = settings.display_safe_dict()
 
     assert displayed["alpaca_api_key_present"] is False
