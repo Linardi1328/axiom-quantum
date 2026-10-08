@@ -1,5 +1,6 @@
 """Phase 7 paper-validation evidence, separate from execution authority."""
 
+from spy_market_agent.phase7_validation.memory import Phase7ValidationMemoryRegistry
 from spy_market_agent.phase7_validation.pilot import (
     Phase7PaperPilotObservation,
     build_phase7_pilot_observation,
@@ -21,6 +22,7 @@ from spy_market_agent.phase7_validation.session import (
 __all__ = [
     "PHASE7_REQUIRED_PAPER_SESSIONS",
     "Phase7PaperPilotObservation",
+    "Phase7ValidationMemoryRegistry",
     "Phase7SafetyEvidence",
     "Phase7SafetyProbe",
     "Phase7ValidationSession",
