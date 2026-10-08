@@ -58,9 +58,8 @@ class PaperAuthorizationConsumption(BaseModel):
     def _identity_matches(self) -> PaperAuthorizationConsumption:
         """Require content-addressed identity to match immutable claim fields."""
 
-        if (
-            self.paper_authorization_consumption_id
-            != paper_authorization_consumption_identity(self)
+        if self.paper_authorization_consumption_id != paper_authorization_consumption_identity(
+            self
         ):
             raise ValueError("paper_authorization_consumption_id must match canonical content")
         return self
@@ -84,9 +83,7 @@ def build_paper_authorization_consumption(
 ) -> PaperAuthorizationConsumption:
     """Build the deterministic single-use claim for one exact authorization."""
 
-    canonical = PaperSubmissionAuthorization.model_validate(
-        authorization.model_dump(mode="python")
-    )
+    canonical = PaperSubmissionAuthorization.model_validate(authorization.model_dump(mode="python"))
     payload: dict[str, object] = {
         "schema_version": PAPER_AUTHORIZATION_CONSUMPTION_SCHEMA_VERSION,
         "paper_submission_authorization_id": canonical.paper_submission_authorization_id,
@@ -98,9 +95,7 @@ def build_paper_authorization_consumption(
         "claim_source": "human_invoked_execution",
         "execution_authority": "none",
     }
-    identity_payload = payload | {
-        "identity_version": PAPER_AUTHORIZATION_CONSUMPTION_ID_VERSION
-    }
+    identity_payload = payload | {"identity_version": PAPER_AUTHORIZATION_CONSUMPTION_ID_VERSION}
     claim_id = f"aq-paper-authorization-consumption-{sha256_json(identity_payload)[:24]}"
     return PaperAuthorizationConsumption.model_validate(
         {"paper_authorization_consumption_id": claim_id, **payload}
@@ -133,10 +128,13 @@ class PaperExecutionMemoryRegistry:
             canonical,
             allow_replace=False,
         )
-        if self.load_session(
-            canonical.experiment_id,
-            canonical.paper_execution_session_id,
-        ) != canonical:
+        if (
+            self.load_session(
+                canonical.experiment_id,
+                canonical.paper_execution_session_id,
+            )
+            != canonical
+        ):
             self._error(
                 "paper_execution_session_reload_mismatch",
                 "stored Phase 6 session differs after canonical reload.",
@@ -178,10 +176,13 @@ class PaperExecutionMemoryRegistry:
         canonical = PaperSubmissionAuthorization.model_validate(
             authorization.model_dump(mode="python")
         )
-        if self.load_session(
-            canonical.experiment_id,
-            canonical.paper_execution_session_id,
-        ) != canonical.session:
+        if (
+            self.load_session(
+                canonical.experiment_id,
+                canonical.paper_execution_session_id,
+            )
+            != canonical.session
+        ):
             self._error(
                 "paper_submission_authorization_session_link_mismatch",
                 "authorization must match its exact stored Phase 6 session.",
@@ -192,10 +193,13 @@ class PaperExecutionMemoryRegistry:
             canonical,
             allow_replace=False,
         )
-        if self.load_authorization(
-            canonical.experiment_id,
-            canonical.paper_submission_authorization_id,
-        ) != canonical:
+        if (
+            self.load_authorization(
+                canonical.experiment_id,
+                canonical.paper_submission_authorization_id,
+            )
+            != canonical
+        ):
             self._error(
                 "paper_submission_authorization_reload_mismatch",
                 "stored Phase 6 authorization differs after canonical reload.",
@@ -223,10 +227,13 @@ class PaperExecutionMemoryRegistry:
                 "paper_submission_authorization_identity_mismatch",
                 "stored authorization identity and experiment must match the request.",
             )
-        if self.load_session(
-            experiment_id,
-            authorization.paper_execution_session_id,
-        ) != authorization.session:
+        if (
+            self.load_session(
+                experiment_id,
+                authorization.paper_execution_session_id,
+            )
+            != authorization.session
+        ):
             self._error(
                 "paper_submission_authorization_session_link_mismatch",
                 "stored authorization must match its exact Phase 6 session.",
@@ -260,10 +267,13 @@ class PaperExecutionMemoryRegistry:
             claim,
             allow_replace=False,
         )
-        if self.load_consumption(
-            canonical.experiment_id,
-            claim.paper_authorization_consumption_id,
-        ) != claim:
+        if (
+            self.load_consumption(
+                canonical.experiment_id,
+                claim.paper_authorization_consumption_id,
+            )
+            != claim
+        ):
             self._error(
                 "paper_authorization_consumption_reload_mismatch",
                 "stored authorization consumption differs after canonical reload.",
@@ -363,10 +373,13 @@ class PaperExecutionMemoryRegistry:
             canonical,
             allow_replace=False,
         )
-        if self.load_outcome(
-            canonical.experiment_id,
-            canonical.paper_execution_outcome_id,
-        ) != canonical:
+        if (
+            self.load_outcome(
+                canonical.experiment_id,
+                canonical.paper_execution_outcome_id,
+            )
+            != canonical
+        ):
             self._error(
                 "paper_execution_outcome_reload_mismatch",
                 "stored Phase 6 outcome differs after canonical reload.",
@@ -390,10 +403,13 @@ class PaperExecutionMemoryRegistry:
                 "paper_execution_outcome_identity_mismatch",
                 "stored outcome identity and experiment must match the request.",
             )
-        if self.load_authorization(
-            experiment_id,
-            outcome.paper_submission_authorization_id,
-        ) != outcome.authorization:
+        if (
+            self.load_authorization(
+                experiment_id,
+                outcome.paper_submission_authorization_id,
+            )
+            != outcome.authorization
+        ):
             self._error(
                 "paper_execution_outcome_authorization_link_mismatch",
                 "stored outcome must match its exact authorization.",
@@ -452,9 +468,8 @@ class PaperExecutionMemoryRegistry:
             model = model_type.model_validate(payload)
         except ValidationError:
             self._error(error_code, "stored Phase 6 record failed canonical validation.")
-        if (
-            self.store.artifact_path(experiment_id, name).read_bytes()
-            != canonical_json_bytes(model)
+        if self.store.artifact_path(experiment_id, name).read_bytes() != canonical_json_bytes(
+            model
         ):
             self._error(
                 "noncanonical_phase6_execution_record",
