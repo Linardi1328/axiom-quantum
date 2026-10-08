@@ -131,15 +131,16 @@ def write_phase7_validation_report(
 ) -> Phase7ValidationReportArtifact:
     """Snapshot all stored evidence and write immutable checksum-verified Markdown."""
 
-    assessment = build_phase7_operational_assessment(
-        experiment_id=experiment_id, registry=registry
-    )
+    assessment = build_phase7_operational_assessment(experiment_id=experiment_id, registry=registry)
     registry.store.write_json(
         experiment_id, phase7_assessment_name(assessment), assessment, allow_replace=False
     )
-    if Phase7OperationalAssessment.model_validate(
-        registry.store.read_json(experiment_id, phase7_assessment_name(assessment))
-    ) != assessment:
+    if (
+        Phase7OperationalAssessment.model_validate(
+            registry.store.read_json(experiment_id, phase7_assessment_name(assessment))
+        )
+        != assessment
+    ):
         raise ValueError("stored Phase 7 assessment differs after canonical reload")
     data = render_phase7_validation_report(assessment).encode("utf-8")
     checksum = sha256_bytes(data)
