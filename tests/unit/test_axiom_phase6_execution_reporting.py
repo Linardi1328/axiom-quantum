@@ -382,9 +382,9 @@ def test_phase6_workflow_result_rejects_broken_links(tmp_path: Path) -> None:
             report=result.report,
         )
 
-    wrong_report = result.report.model_copy(update={"outcome_ids": (
-        "aq-paper-execution-outcome-000000000000000000000000",
-    )})
+    wrong_report = result.report.model_copy(
+        update={"outcome_ids": ("aq-paper-execution-outcome-000000000000000000000000",)}
+    )
     with pytest.raises(ValueError, match="exact outcome chain"):
         PaperExecutionWorkflowResult(
             session=result.session,
