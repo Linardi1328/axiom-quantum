@@ -156,7 +156,10 @@ class PaperExecutionMemoryRegistry:
             PaperExecutionSession,
             "invalid_paper_execution_session_record",
         )
-        if (\n            session.paper_execution_session_id != session_id\n            or session.experiment_id != experiment_id\n        ):
+        if (
+            session.paper_execution_session_id != session_id
+            or session.experiment_id != experiment_id
+        ):
             self._error(
                 "paper_execution_session_identity_mismatch",
                 "stored Phase 6 session identity and experiment must match the request.",
@@ -279,7 +282,10 @@ class PaperExecutionMemoryRegistry:
             PaperAuthorizationConsumption,
             "invalid_paper_authorization_consumption_record",
         )
-        if (\n            claim.paper_authorization_consumption_id != claim_id\n            or claim.experiment_id != experiment_id\n        ):
+        if (
+            claim.paper_authorization_consumption_id != claim_id
+            or claim.experiment_id != experiment_id
+        ):
             self._error(
                 "paper_authorization_consumption_identity_mismatch",
                 "stored consumption identity and experiment must match the request.",
@@ -376,7 +382,10 @@ class PaperExecutionMemoryRegistry:
             PaperExecutionOutcome,
             "invalid_paper_execution_outcome_record",
         )
-        if (\n            outcome.paper_execution_outcome_id != outcome_id\n            or outcome.experiment_id != experiment_id\n        ):
+        if (
+            outcome.paper_execution_outcome_id != outcome_id
+            or outcome.experiment_id != experiment_id
+        ):
             self._error(
                 "paper_execution_outcome_identity_mismatch",
                 "stored outcome identity and experiment must match the request.",
@@ -424,7 +433,10 @@ class PaperExecutionMemoryRegistry:
         matches: list[str] = []
         for outcome_id in self.list_outcome_ids(stored.experiment_id):
             outcome = self.load_outcome(stored.experiment_id, outcome_id)
-            if (\n                outcome.paper_submission_authorization_id\n                == stored.paper_submission_authorization_id\n            ):
+            if (
+                outcome.paper_submission_authorization_id
+                == stored.paper_submission_authorization_id
+            ):
                 matches.append(outcome_id)
         return tuple(sorted(matches))
 
@@ -440,7 +452,10 @@ class PaperExecutionMemoryRegistry:
             model = model_type.model_validate(payload)
         except ValidationError:
             self._error(error_code, "stored Phase 6 record failed canonical validation.")
-        if (\n            self.store.artifact_path(experiment_id, name).read_bytes()\n            != canonical_json_bytes(model)\n        ):
+        if (
+            self.store.artifact_path(experiment_id, name).read_bytes()
+            != canonical_json_bytes(model)
+        ):
             self._error(
                 "noncanonical_phase6_execution_record",
                 "stored Phase 6 record bytes must be canonical.",
@@ -478,7 +493,9 @@ class PaperExecutionMemoryRegistry:
 
     @staticmethod
     def _session_name(value: str) -> str:
-        return PaperExecutionMemoryRegistry._name(\n            value, _SESSION_ID, PAPER_EXECUTION_SESSION_PREFIX\n        )
+        return PaperExecutionMemoryRegistry._name(
+            value, _SESSION_ID, PAPER_EXECUTION_SESSION_PREFIX
+        )
 
     @staticmethod
     def _authorization_name(value: str) -> str:
@@ -498,7 +515,9 @@ class PaperExecutionMemoryRegistry:
 
     @staticmethod
     def _outcome_name(value: str) -> str:
-        return PaperExecutionMemoryRegistry._name(\n            value, _OUTCOME_ID, PAPER_EXECUTION_OUTCOME_PREFIX\n        )
+        return PaperExecutionMemoryRegistry._name(
+            value, _OUTCOME_ID, PAPER_EXECUTION_OUTCOME_PREFIX
+        )
 
     @staticmethod
     def _name(value: str, pattern: re.Pattern[str], prefix: str) -> str:
