@@ -34,8 +34,16 @@ Validate reliability of the existing explicitly human-invoked paper execution wo
 * Model-connected trading, supervised automation, and live trading remain explicitly blocked pending separate research/model approval.
 * A real owner-run pilot, broker audit, and risk/performance assessment are required before authorizing any change in operational mode.
 
-All exact-head PR gates: focused tests, Ruff, Ruff format, MyPy src/tests, full pytest coverage, whitespace check, Betterleaks, genuine CodeRabbit review, exact-head manual approval, squash merge and verified main.
+All exact-head PR gates: focused tests, Ruff, Ruff format, MyPy src/tests, full pytest coverage, whitespace check, Betterleaks, CodeRabbit review or owner-authorized structured AI fallback when rate-limited, exact-head documented review and approval, squash merge and verified main.
 
 ## Slice 2 — synthetic adversarial evidence
 
 `Phase7SafetyProbe` records sanitized expected and observed error/outcome codes and a checksum of a deterministic synthetic fixture. The immutable `Phase7SafetyEvidence` record requires the exact six critical probes in order, no duplicate fixture checksums, and exact stored Phase 5 assessment lineage. A probe is marked passed only if expected and observed codes match. The record is always `synthetic_fixture`; passing it cannot represent a paper-broker observation or authorize trading. Automated tests additionally exercise invalid/missing probes, failed outcomes, and forged sources. The broker is never invoked.
+
+## Slice 3 — operator-attested pilot observations
+
+`Phase7PaperPilotObservation` is a human-reviewed, content-addressed record of an explicitly requested `paper_broker` session. The operator must explicitly pass `human_reviewed=True` and a safe opaque `attestation_ref`. An abstention has a reason and **no broker order evidence**; a recorded execution must include a stored Phase 6 outcome, its checksum-verified report, and a SHA-256 reference to separately retained sanitized broker evidence. The builder reloads exact stored Phase 5 and Phase 6 lineage before recording anything.
+
+**Provenance limitation:** `operator_attested_paper_broker` and a digest do not cryptographically prove the broker-origin authenticity of the record. Even tests using fake brokers may construct the same type; each record deliberately states `broker_verification=not_independently_verified`. A separate owner audit of broker paper receipts is required before making any operational go/no-go decision. This package does not submit or reconcile orders and does not unlock P5-C.
+
+**Review fallback approved 2026-10-08:** When CodeRabbit is unavailable, an exact-head documented second-pass AI/security review may be used alongside all ordinary CI, coverage, and secrets gates; identify reviewer provenance accurately and do not misrepresent self-review as independent human approval. A formal GitHub approval is unavailable for self-authored PRs; record approval via an auditable PR discussion comment only after checks pass.
