@@ -58,12 +58,8 @@ def _fixture(
 
 def test_safety_evidence_is_canonical_and_synthetic_only(tmp_path: Path) -> None:
     session, registry, probes = _fixture(tmp_path)
-    first = build_phase7_safety_evidence(
-        session=session, probes=probes, registry=registry
-    )
-    assert first == build_phase7_safety_evidence(
-        session=session, probes=probes, registry=registry
-    )
+    first = build_phase7_safety_evidence(session=session, probes=probes, registry=registry)
+    assert first == build_phase7_safety_evidence(session=session, probes=probes, registry=registry)
     assert first.passed
     assert first.execution_authority == "none"
     assert first.evidence_source == "synthetic_fixture"
@@ -76,9 +72,7 @@ def test_failed_probe_is_not_silently_marked_passed(tmp_path: Path) -> None:
     result = build_phase7_safety_evidence(
         session=session, probes=(failed, *probes[1:]), registry=registry
     )
-    original = build_phase7_safety_evidence(
-        session=session, probes=probes, registry=registry
-    )
+    original = build_phase7_safety_evidence(session=session, probes=probes, registry=registry)
     assert not result.passed
     assert not result.probes[0].passed
     assert original.passed
@@ -90,9 +84,7 @@ def test_safety_rejects_missing_duplicate_and_out_of_order_probes(tmp_path: Path
     invalid_sets = (probes[:-1], (probes[0], *probes[1:-1], probes[0]), probes[::-1])
     for invalid in invalid_sets:
         with pytest.raises(ValueError, match="all six ordered critical probes"):
-            build_phase7_safety_evidence(
-                session=session, probes=invalid, registry=registry
-            )
+            build_phase7_safety_evidence(session=session, probes=invalid, registry=registry)
     repeated = probes[1].model_copy(update={"fixture_checksum": probes[0].fixture_checksum})
     with pytest.raises(ValueError, match="must be distinct"):
         build_phase7_safety_evidence(
@@ -105,25 +97,19 @@ def test_safety_rejects_missing_duplicate_and_out_of_order_probes(tmp_path: Path
 def test_safety_rejects_paper_broker_mode(tmp_path: Path) -> None:
     session, registry, probes = _fixture(tmp_path, mode="paper_broker")
     with pytest.raises(ValueError, match="synthetic validation session"):
-        build_phase7_safety_evidence(
-            session=session, probes=probes, registry=registry
-        )
+        build_phase7_safety_evidence(session=session, probes=probes, registry=registry)
 
 
 def test_safety_rejects_content_forgery_and_unsanitized_codes(tmp_path: Path) -> None:
     session, registry, probes = _fixture(tmp_path)
-    result = build_phase7_safety_evidence(
-        session=session, probes=probes, registry=registry
-    )
+    result = build_phase7_safety_evidence(session=session, probes=probes, registry=registry)
     with pytest.raises(ValueError, match="exact session"):
         Phase7SafetyEvidence.model_validate(
             result.model_dump(mode="python") | {"experiment_id": "wrong"}
         )
     altered = (*probes[:-1], probes[-1].model_copy(update={"observed_code": "wrong"}))
     with pytest.raises(ValueError, match="canonical content"):
-        Phase7SafetyEvidence.model_validate(
-            result.model_dump(mode="python") | {"probes": altered}
-        )
+        Phase7SafetyEvidence.model_validate(result.model_dump(mode="python") | {"probes": altered})
     for bad in ("", "unsafe text", "SECRET=some_key"):
         with pytest.raises(ValueError, match="sanitized"):
             Phase7SafetyProbe(
