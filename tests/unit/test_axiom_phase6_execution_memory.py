@@ -95,14 +95,20 @@ def _chain(
 def test_phase6_memory_round_trips_exact_session_and_authorization(tmp_path: Path) -> None:
     _, _, memory, authorization, _, _ = _chain(tmp_path)
 
-    assert memory.load_session(
-        authorization.experiment_id,
-        authorization.paper_execution_session_id,
-    ) == authorization.session
-    assert memory.load_authorization(
-        authorization.experiment_id,
-        authorization.paper_submission_authorization_id,
-    ) == authorization
+    assert (
+        memory.load_session(
+            authorization.experiment_id,
+            authorization.paper_execution_session_id,
+        )
+        == authorization.session
+    )
+    assert (
+        memory.load_authorization(
+            authorization.experiment_id,
+            authorization.paper_submission_authorization_id,
+        )
+        == authorization
+    )
     assert memory.list_session_ids(authorization.experiment_id) == (
         authorization.paper_execution_session_id,
     )
@@ -143,10 +149,13 @@ def test_phase6_memory_records_one_accepted_submission_outcome(tmp_path: Path) -
     )
     memory.record_outcome(outcome)
 
-    assert memory.load_outcome(
-        authorization.experiment_id,
-        outcome.paper_execution_outcome_id,
-    ) == outcome
+    assert (
+        memory.load_outcome(
+            authorization.experiment_id,
+            outcome.paper_execution_outcome_id,
+        )
+        == outcome
+    )
     assert memory.list_outcome_ids_for_authorization(authorization) == (
         outcome.paper_execution_outcome_id,
     )
