@@ -388,7 +388,9 @@ class PaperExecutionMemoryRegistry:
             canonical.experiment_id,
             guard_name,
             {
-                "paper_submission_authorization_id": authorization.paper_submission_authorization_id,
+                "paper_submission_authorization_id": (
+                    authorization.paper_submission_authorization_id
+                ),
                 "slot": guard_slot,
             },
             conflict_code=conflict_code,
