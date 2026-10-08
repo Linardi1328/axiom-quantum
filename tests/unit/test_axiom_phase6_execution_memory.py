@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import cast
 
@@ -251,3 +253,53 @@ def test_phase6_memory_conflicting_session_bytes_cannot_replace(tmp_path: Path) 
 
     with pytest.raises(ResearchArtifactError, match="conflicts"):
         memory.record_session(authorization.session)
+
+def test_phase6_authorization_consumption_is_atomic_under_concurrency(tmp_path: Path) -> None:
+    _, _, memory, authorization, _, _ = _chain(tmp_path)
+    barrier = threading.Barrier(2)
+
+    def claim_once() -> bool:
+        barrier.wait()
+        try:
+            memory.claim_submission(authorization)
+        except ResearchRegistryError as exc:
+            assert exc.code == "paper_submission_authorization_already_consumed"
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(lambda _index: claim_once(), range(2)))
+
+    assert results.count(True) == 1
+    assert results.count(False) == 1
+
+
+def test_phase6_submission_outcome_slot_is_atomic_under_concurrency(tmp_path: Path) -> None:
+    _, readiness, memory, authorization, instruction, approval = _chain(tmp_path)
+    service = _Service(submit_receipt=make_receipt(instruction))
+    outcome = submit_authorized_paper_order(
+        authorization=authorization,
+        instruction=instruction,
+        approval=approval,
+        registry=readiness,
+        claim_registry=memory,
+        service=cast(PaperExecutionService, service),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    barrier = threading.Barrier(2)
+
+    def record_once() -> bool:
+        barrier.wait()
+        try:
+            memory.record_outcome(outcome)
+        except ResearchRegistryError as exc:
+            assert exc.code == "paper_submission_outcome_already_recorded"
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(lambda _index: record_once(), range(2)))
+
+    assert results.count(True) == 1
+    assert results.count(False) == 1
+
