@@ -36,7 +36,9 @@ class Phase7ValidationSession(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-validation-session-v1"] = "axiom-paper-validation-session-v1"
+    schema_version: Literal["axiom-paper-validation-session-v1"] = (
+        "axiom-paper-validation-session-v1"
+    )
     validation_session_id: str
     invocation_id: str
     observation_date: date
