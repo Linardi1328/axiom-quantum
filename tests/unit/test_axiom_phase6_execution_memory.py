@@ -258,20 +258,19 @@ def test_phase6_authorization_consumption_is_atomic_under_concurrency(tmp_path: 
     _, _, memory, authorization, _, _ = _chain(tmp_path)
     barrier = threading.Barrier(2)
 
-    def claim_once() -> bool:
+    def claim_once() -> str:
         barrier.wait()
         try:
             memory.claim_submission(authorization)
         except ResearchRegistryError as exc:
-            assert exc.code == "paper_submission_authorization_already_consumed"
-            return False
-        return True
+            return exc.code
+        return "success"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _index: claim_once(), range(2)))
 
-    assert results.count(True) == 1
-    assert results.count(False) == 1
+    assert results.count("success") == 1
+    assert results.count("paper_submission_authorization_already_consumed") == 1
 
 
 def test_phase6_submission_outcome_slot_is_atomic_under_concurrency(tmp_path: Path) -> None:
@@ -288,18 +287,17 @@ def test_phase6_submission_outcome_slot_is_atomic_under_concurrency(tmp_path: Pa
     )
     barrier = threading.Barrier(2)
 
-    def record_once() -> bool:
+    def record_once() -> str:
         barrier.wait()
         try:
             memory.record_outcome(outcome)
         except ResearchRegistryError as exc:
-            assert exc.code == "paper_submission_outcome_already_recorded"
-            return False
-        return True
+            return exc.code
+        return "success"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _index: record_once(), range(2)))
 
-    assert results.count(True) == 1
-    assert results.count(False) == 1
+    assert results.count("success") == 1
+    assert results.count("paper_submission_outcome_already_recorded") == 1
 
