@@ -51,12 +51,8 @@ class Phase7PaperPilotObservation(BaseModel):
     incident_codes: tuple[IncidentCode, ...] = ()
     attestation_ref: str
     human_reviewed: Literal[True]
-    evidence_source: Literal["operator_attested_paper_broker"] = (
-        "operator_attested_paper_broker"
-    )
-    broker_verification: Literal["not_independently_verified"] = (
-        "not_independently_verified"
-    )
+    evidence_source: Literal["operator_attested_paper_broker"] = "operator_attested_paper_broker"
+    broker_verification: Literal["not_independently_verified"] = "not_independently_verified"
     execution_authority: Literal["none"] = "none"
 
     @field_validator("attestation_ref")
