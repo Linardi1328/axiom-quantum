@@ -36,9 +36,7 @@ class Phase7ValidationSession(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-validation-session-v1"] = (
-        PHASE7_SESSION_SCHEMA_VERSION
-    )
+    schema_version: Literal["axiom-paper-validation-session-v1"] = PHASE7_SESSION_SCHEMA_VERSION
     validation_session_id: str
     invocation_id: str
     observation_date: date
@@ -101,9 +99,7 @@ def build_phase7_validation_session(
 ) -> Phase7ValidationSession:
     """Admit a human validation session only after reloading exact stored Phase 5 lineage."""
 
-    canonical = PaperReadinessAssessment.model_validate(
-        assessment.model_dump(mode="python")
-    )
+    canonical = PaperReadinessAssessment.model_validate(assessment.model_dump(mode="python"))
     if registry.load_assessment(canonical.experiment_id, canonical.assessment_id) != canonical:
         raise ValueError("validation parent must match exact stored Phase 5 assessment")
     payload: dict[str, object] = {
@@ -118,9 +114,7 @@ def build_phase7_validation_session(
         "execution_authority": "none",
         "model_connected_execution": "blocked_no_approved_paper_model",
     }
-    digest = sha256_json(
-        {**payload, "identity_version": PHASE7_SESSION_ID_VERSION}
-    )[:24]
+    digest = sha256_json({**payload, "identity_version": PHASE7_SESSION_ID_VERSION})[:24]
     return Phase7ValidationSession.model_validate(
         {"validation_session_id": f"aq-paper-validation-session-{digest}", **payload}
     )
