@@ -44,9 +44,7 @@ class PaperExecutionReportArtifact(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-execution-report-v1"] = (
-        "axiom-paper-execution-report-v1"
-    )
+    schema_version: Literal["axiom-paper-execution-report-v1"] = "axiom-paper-execution-report-v1"
     report_id: str
     paper_submission_authorization_id: str
     paper_execution_session_id: str
@@ -170,8 +168,7 @@ def render_paper_execution_report(
         authorization.model_dump(mode="python")
     )
     canonical_outcomes = tuple(
-        PaperExecutionOutcome.model_validate(item.model_dump(mode="python"))
-        for item in outcomes
+        PaperExecutionOutcome.model_validate(item.model_dump(mode="python")) for item in outcomes
     )
     if not canonical_outcomes:
         raise ValueError("at least one outcome is required")
@@ -328,8 +325,7 @@ def load_paper_execution_report(
         for outcome_id in canonical.outcome_ids
     )
     if any(
-        item.paper_submission_authorization_id
-        != canonical.paper_submission_authorization_id
+        item.paper_submission_authorization_id != canonical.paper_submission_authorization_id
         for item in outcomes
     ):
         raise_research_error(
