@@ -46,6 +46,7 @@ def test_phase7_session_id_changes_with_mode_date_and_invocation(tmp_path: Path)
             mode=mode,  # type: ignore[arg-type]
             registry=registry,
         )
+
     ids = {
         build("synthetic", "a", date(2026, 10, 8)).validation_session_id,
         build("paper_broker", "a", date(2026, 10, 8)).validation_session_id,
