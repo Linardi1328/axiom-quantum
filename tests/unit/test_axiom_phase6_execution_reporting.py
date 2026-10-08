@@ -231,7 +231,10 @@ def test_phase6_report_load_fails_closed_after_report_tamper(tmp_path: Path) -> 
         approval=make_approval(instruction),
         readiness_registry=readiness,
         execution_registry=memory,
-        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        service=cast(
+            PaperExecutionService,
+            _Service(submit_receipt=make_receipt(instruction)),
+        ),
         broker=cast(PaperBrokerProtocol, FakePaperBroker()),
     )
     report_path = store.artifact_path(
@@ -406,7 +409,6 @@ def test_phase6_workflow_result_rejects_broken_links(tmp_path: Path) -> None:
         )
 
 
-
 def test_phase6_workflow_result_rejects_foreign_outcome_and_report_links(
     tmp_path: Path,
 ) -> None:
@@ -528,7 +530,11 @@ def test_phase6_report_write_detects_reload_mismatch(
         service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
         broker=cast(PaperBrokerProtocol, FakePaperBroker()),
     )
-    monkeypatch.setattr(reporting_module, "load_paper_execution_report", lambda *_args, **_kwargs: "mismatch")
+    monkeypatch.setattr(
+        reporting_module,
+        "load_paper_execution_report",
+        lambda *_args, **_kwargs: "mismatch",
+    )
 
     with pytest.raises(ResearchRegistryError, match="differs after deterministic reload"):
         write_paper_execution_report(result.outcomes[-1], registry=memory)
@@ -600,7 +606,11 @@ def test_phase6_report_load_rejects_render_io_and_content_mismatches(
             load_paper_execution_report(result.report, registry=memory)
 
     with monkeypatch.context() as patch:
-        patch.setattr(Path, "read_text", lambda *_args, **_kwargs: "different stored content\n")
+        patch.setattr(
+            Path,
+            "read_text",
+            lambda *_args, **_kwargs: "different stored content\n",
+        )
         with pytest.raises(ResearchRegistryError, match="content does not match"):
             load_paper_execution_report(result.report, registry=memory)
 
