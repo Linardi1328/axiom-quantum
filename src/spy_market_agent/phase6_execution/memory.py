@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Literal, NoReturn, TypeVar
 
@@ -17,6 +18,8 @@ PAPER_EXECUTION_SESSION_PREFIX = "axiom_paper_execution_session_"
 PAPER_SUBMISSION_AUTHORIZATION_PREFIX = "axiom_paper_submission_authorization_"
 PAPER_AUTHORIZATION_CONSUMPTION_PREFIX = "axiom_paper_authorization_consumption_"
 PAPER_EXECUTION_OUTCOME_PREFIX = "axiom_paper_execution_outcome_"
+PAPER_SUBMISSION_OUTCOME_GUARD_PREFIX = "axiom_paper_submission_outcome_guard_"
+PAPER_RECONCILIATION_OUTCOME_GUARD_PREFIX = "axiom_paper_reconciliation_outcome_guard_"
 PAPER_AUTHORIZATION_CONSUMPTION_SCHEMA_VERSION = "axiom-paper-authorization-consumption-v1"
 PAPER_AUTHORIZATION_CONSUMPTION_ID_VERSION = "axiom-paper-authorization-consumption-id-v1"
 
@@ -259,16 +262,12 @@ class PaperExecutionMemoryRegistry:
             )
         claim = build_paper_authorization_consumption(canonical)
         name = self._consumption_name(claim.paper_authorization_consumption_id)
-        if name in self.store.existing_artifacts(canonical.experiment_id):
-            self._error(
-                "paper_submission_authorization_already_consumed",
-                "paper submission authorization has already been consumed.",
-            )
-        self.store.write_json(
+        self._write_json_exclusive(
             canonical.experiment_id,
             name,
             claim,
-            allow_replace=False,
+            conflict_code="paper_submission_authorization_already_consumed",
+            conflict_message="paper submission authorization has already been consumed.",
         )
         if (
             self.load_consumption(
@@ -365,11 +364,36 @@ class PaperExecutionMemoryRegistry:
                     "paper_reconciliation_already_recorded",
                     "only one reconciliation outcome may be recorded per authorization.",
                 )
-        elif submissions:
-            self._error(
-                "paper_submission_outcome_already_recorded",
-                "only one submission outcome may be recorded per authorization.",
+            guard_name = self._outcome_guard_name(
+                authorization.paper_submission_authorization_id,
+                reconciliation=True,
             )
+            conflict_code = "paper_reconciliation_already_recorded"
+            conflict_message = "only one reconciliation outcome may be recorded per authorization."
+            guard_slot = "reconciliation"
+        else:
+            if submissions:
+                self._error(
+                    "paper_submission_outcome_already_recorded",
+                    "only one submission outcome may be recorded per authorization.",
+                )
+            guard_name = self._outcome_guard_name(
+                authorization.paper_submission_authorization_id,
+                reconciliation=False,
+            )
+            conflict_code = "paper_submission_outcome_already_recorded"
+            conflict_message = "only one submission outcome may be recorded per authorization."
+            guard_slot = "submission"
+        self._write_json_exclusive(
+            canonical.experiment_id,
+            guard_name,
+            {
+                "paper_submission_authorization_id": authorization.paper_submission_authorization_id,
+                "slot": guard_slot,
+            },
+            conflict_code=conflict_code,
+            conflict_message=conflict_message,
+        )
         self.store.write_json(
             canonical.experiment_id,
             self._outcome_name(canonical.paper_execution_outcome_id),
@@ -480,6 +504,51 @@ class PaperExecutionMemoryRegistry:
             )
         return model
 
+    def _write_json_exclusive(
+        self,
+        experiment_id: str,
+        name: str,
+        payload: object,
+        *,
+        conflict_code: str,
+        conflict_message: str,
+    ) -> None:
+        """Create one canonical JSON artifact atomically and fail if it already exists."""
+
+        path = self.store.artifact_path(experiment_id, name)
+        data = canonical_json_bytes(payload)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            descriptor = os.open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            self._error(conflict_code, conflict_message)
+        try:
+            with os.fdopen(descriptor, "wb") as file_handle:
+                file_handle.write(data)
+                file_handle.flush()
+                os.fsync(file_handle.fileno())
+        except OSError:
+            path.unlink(missing_ok=True)
+            self._error(
+                "phase6_exclusive_write_failed",
+                "atomic Phase 6 audit artifact write failed.",
+            )
+        try:
+            if path.read_bytes() != data:
+                self._error(
+                    "phase6_exclusive_write_mismatch",
+                    "atomic Phase 6 audit artifact bytes differ after write.",
+                )
+        except OSError:
+            self._error(
+                "phase6_exclusive_write_failed",
+                "atomic Phase 6 audit artifact could not be verified.",
+            )
+
     def _list_ids(
         self,
         experiment_id: str,
@@ -530,6 +599,21 @@ class PaperExecutionMemoryRegistry:
             _CLAIM_ID,
             PAPER_AUTHORIZATION_CONSUMPTION_PREFIX,
         )
+
+    @staticmethod
+    def _outcome_guard_name(authorization_id: str, *, reconciliation: bool) -> str:
+        if not _AUTH_ID.fullmatch(authorization_id):
+            raise_research_error(
+                ResearchRegistryError,
+                "invalid_phase6_execution_identity",
+                "Phase 6 execution identity must be canonical.",
+            )
+        prefix = (
+            PAPER_RECONCILIATION_OUTCOME_GUARD_PREFIX
+            if reconciliation
+            else PAPER_SUBMISSION_OUTCOME_GUARD_PREFIX
+        )
+        return f"{prefix}{authorization_id}.json"
 
     @staticmethod
     def _outcome_name(value: str) -> str:
