@@ -1,6 +1,6 @@
 # Axiom Quantum Phase 6 - Human-Confirmed Paper Execution Specification
 
-Status: implementation candidate; complete only after all five Phase 6 slices are squash-merged and merged-main verification passes.
+Status: completion candidate; Slices 1-4 are merged and Slice 5 completes the implementation. Phase 6 is complete only after Slice 5 is squash-merged and merged-main verification passes.
 
 Linear: `RIC-48` through `RIC-52`
 
@@ -131,6 +131,48 @@ The governed execution bridge:
 The broker remains an injected `PaperBrokerProtocol`. Slice 3 adds no scheduler, recurrence,
 background worker, unsolicited notification, model-connected execution, live endpoint, or live
 trading path.
+
+## Slice 4 Contract
+
+Slice 4 introduces `PaperExecutionMemoryRegistry` and immutable authorization-consumption
+evidence.
+
+Phase 6 audit memory:
+
+- persists sessions and authorizations only after exact Phase 5/6 parent verification;
+- consumes one authorization exactly once through an exclusive append-only claim artifact;
+- permits one submission outcome and, only after `submission_unknown`, at most one lookup-only
+  reconciliation outcome;
+- reloads every record through canonical bytes and complete stored lineage;
+- rejects duplicate use, conflicting outcomes, malformed identities, parent substitution, and
+  tampered records fail closed.
+
+Slice 4 adds no broker behavior, credential handling, scheduler, recurrence, automatic retry,
+model-connected execution, or live trading.
+
+## Slice 5 Contract
+
+Slice 5 introduces checksum-bound Phase 6 execution reports plus explicit submission and
+reconciliation workflow orchestration.
+
+Phase 6 completion:
+
+- renders immutable human-auditable reports over the exact stored session, authorization, and
+  outcome chain;
+- derives report identity from exact deterministic report bytes and verifies checksum, path,
+  lineage, and content on reload;
+- orchestrates a submission only from an explicit human invocation and injected
+  `PaperExecutionService` / `PaperBrokerProtocol`;
+- requires any reconciliation to be a separate explicit call and preserves lookup-only
+  `client_order_id` behavior with no automatic resubmission;
+- covers accepted, rejected, blocked, submission-unknown, reconciliation, duplicate-use, tamper,
+  and deterministic replay behavior;
+- preserves `paper_only` scope and
+  `blocked_no_approved_paper_model` model-connected posture.
+
+Slice 5 creates no scheduler, daemon, recurrence, background worker, unsolicited notification,
+automatic approval, automatic resubmission, live broker path, leverage, shorts, fractional
+shares, new assets, or new order types.
 
 ## Quality and Merge Gates
 
