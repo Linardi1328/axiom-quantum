@@ -22,9 +22,9 @@ from spy_market_agent.phase7_validation.session import (
 __all__ = [
     "PHASE7_REQUIRED_PAPER_SESSIONS",
     "Phase7PaperPilotObservation",
-    "Phase7ValidationMemoryRegistry",
     "Phase7SafetyEvidence",
     "Phase7SafetyProbe",
+    "Phase7ValidationMemoryRegistry",
     "Phase7ValidationSession",
     "build_phase7_pilot_observation",
     "build_phase7_safety_evidence",
