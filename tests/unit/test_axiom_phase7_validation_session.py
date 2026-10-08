@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 import spy_market_agent.phase7_validation.session as module
-from spy_market_agent.paper_ops import PaperReadinessMemoryRegistry
 from spy_market_agent.phase7_validation import (
     PHASE7_REQUIRED_PAPER_SESSIONS,
     Phase7ValidationSession,
@@ -38,6 +37,7 @@ def test_phase7_session_is_explicit_deterministic_and_nonexecuting(tmp_path: Pat
 
 def test_phase7_session_id_changes_with_mode_date_and_invocation(tmp_path: Path) -> None:
     _, registry, assessment = _stored_assessment(tmp_path)
+
     def build(mode: str, invocation: str, day: date) -> Phase7ValidationSession:
         return build_phase7_validation_session(
             assessment=assessment,
