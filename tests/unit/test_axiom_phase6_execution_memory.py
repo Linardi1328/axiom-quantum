@@ -293,7 +293,7 @@ def test_phase6_submission_outcome_slot_is_atomic_under_concurrency(tmp_path: Pa
         try:
             memory.record_outcome(outcome)
         except ResearchRegistryError as exc:
-            return exc.code
+            return exc.codes[0]
         return "success"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
