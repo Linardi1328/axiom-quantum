@@ -254,6 +254,7 @@ def test_phase6_memory_conflicting_session_bytes_cannot_replace(tmp_path: Path) 
     with pytest.raises(ResearchArtifactError, match="conflicts"):
         memory.record_session(authorization.session)
 
+
 def test_phase6_authorization_consumption_is_atomic_under_concurrency(tmp_path: Path) -> None:
     _, _, memory, authorization, _, _ = _chain(tmp_path)
     barrier = threading.Barrier(2)
