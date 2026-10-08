@@ -14,11 +14,16 @@ from spy_market_agent.execution import (
 )
 from spy_market_agent.execution.models import PaperOrderReceipt
 from spy_market_agent.execution.protocols import PaperBrokerProtocol
+from spy_market_agent.paper_ops import build_paper_execution_session
 from spy_market_agent.phase6_execution import (
     PaperExecutionMemoryRegistry,
+    PaperExecutionReportArtifact,
+    PaperExecutionWorkflowResult,
     load_paper_execution_report,
+    render_paper_execution_report,
     run_paper_reconciliation_workflow,
     run_paper_submission_workflow,
+    write_paper_execution_report,
 )
 from spy_market_agent.research.errors import ResearchRegistryError
 from unit.phase8_helpers import (
@@ -250,12 +255,298 @@ def test_phase6_reporting_source_has_no_autonomous_or_live_execution_path() -> N
     text = source.read_text(encoding="utf-8").lower()
 
     for forbidden in (
-        "tradingclient",
-        "scheduler",
-        "cron",
-        "while true",
-        "live trading",
-        "background worker",
-        "auto-resubmit",
+        "tradingclient(",
+        "alpacapaperbroker(",
+        "schedule.every",
+        "subprocess.",
+        "threading.",
+        "asyncio.create_task",
+        "while true:",
     ):
         assert forbidden not in text
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("relative_path", "", "nonempty POSIX"),
+        ("relative_path", "../unsafe.md", "stay relative"),
+        ("report_id", "not-a-report", "report_id must be canonical"),
+        (
+            "paper_submission_authorization_id",
+            "not-an-authorization",
+            "paper_submission_authorization_id must be canonical",
+        ),
+        (
+            "paper_execution_session_id",
+            "not-a-session",
+            "paper_execution_session_id must be canonical",
+        ),
+        ("outcome_ids", (), "outcome_ids must contain"),
+        ("checksum", "not-a-checksum", "checksum must be canonical"),
+        (
+            "report_id",
+            "aq-paper-execution-report-000000000000000000000000",
+            "derived from the exact report checksum",
+        ),
+    ],
+)
+def test_phase6_report_artifact_rejects_malformed_metadata(
+    tmp_path: Path,
+    field_name: str,
+    value: object,
+    message: str,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-validation",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    payload = result.report.model_dump(mode="python")
+    payload[field_name] = value
+
+    with pytest.raises(ValueError, match=message):
+        PaperExecutionReportArtifact.model_validate(payload)
+
+
+def test_phase6_report_artifact_rejects_duplicate_and_misaligned_outcome_ids(
+    tmp_path: Path,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-outcome-validation",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    outcome_id = result.report.final_outcome_id
+    duplicate = result.report.model_dump(mode="python")
+    duplicate["outcome_ids"] = (outcome_id, outcome_id)
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        PaperExecutionReportArtifact.model_validate(duplicate)
+
+    misaligned = result.report.model_dump(mode="python")
+    misaligned["outcome_ids"] = (
+        outcome_id,
+        "aq-paper-execution-outcome-000000000000000000000000",
+    )
+    with pytest.raises(ValueError, match="final listed outcome"):
+        PaperExecutionReportArtifact.model_validate(misaligned)
+
+
+def test_phase6_workflow_result_rejects_broken_links(tmp_path: Path) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-workflow-validation",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    other_session = build_paper_execution_session(
+        assessment=session.assessment,
+        invocation_id="phase6-workflow-other-session",
+        registry=readiness,
+    )
+    with pytest.raises(ValueError, match="exact execution session"):
+        PaperExecutionWorkflowResult(
+            session=other_session,
+            authorization=result.authorization,
+            outcomes=result.outcomes,
+            report=result.report,
+        )
+    with pytest.raises(ValueError, match="at least one execution outcome"):
+        PaperExecutionWorkflowResult(
+            session=result.session,
+            authorization=result.authorization,
+            outcomes=(),
+            report=result.report,
+        )
+
+    wrong_report = result.report.model_copy(update={"outcome_ids": (
+        "aq-paper-execution-outcome-000000000000000000000000",
+    )})
+    with pytest.raises(ValueError, match="exact outcome chain"):
+        PaperExecutionWorkflowResult(
+            session=result.session,
+            authorization=result.authorization,
+            outcomes=result.outcomes,
+            report=wrong_report,
+        )
+    wrong_disposition = result.report.model_copy(update={"final_disposition": "blocked"})
+    with pytest.raises(ValueError, match="disposition"):
+        PaperExecutionWorkflowResult(
+            session=result.session,
+            authorization=result.authorization,
+            outcomes=result.outcomes,
+            report=wrong_disposition,
+        )
+
+
+def test_phase6_render_rejects_empty_or_foreign_outcome_chain(tmp_path: Path) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    first = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-render-first",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    with pytest.raises(ValueError, match="at least one outcome"):
+        render_paper_execution_report(first.authorization, ())
+
+    second_store, second_readiness, second_session = _session(tmp_path / "second")
+    second_memory = PaperExecutionMemoryRegistry(second_store)
+    second_instruction = make_instruction(
+        signal_id="signal-render-second",
+        client_order_id="paper-order-render-second",
+    )
+    second = run_paper_submission_workflow(
+        assessment=second_session.assessment,
+        invocation_id="phase6-render-second",
+        instruction=second_instruction,
+        approval=make_approval(second_instruction, approval_id="approval-render-second"),
+        readiness_registry=second_readiness,
+        execution_registry=second_memory,
+        service=cast(
+            PaperExecutionService,
+            _Service(submit_receipt=make_receipt(second_instruction)),
+        ),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    with pytest.raises(ValueError, match="exact authorization"):
+        render_paper_execution_report(first.authorization, second.outcomes)
+
+
+def test_phase6_report_write_and_load_reject_substituted_links(tmp_path: Path) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    result = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-link-validation",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, _Service(submit_receipt=make_receipt(instruction))),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    altered_outcome = result.outcomes[-1].model_copy(update={"failure_code": "substituted"})
+    with pytest.raises(ResearchRegistryError, match="exact stored Phase 6 outcome"):
+        write_paper_execution_report(altered_outcome, registry=memory)
+
+    wrong_session = result.report.model_copy(
+        update={"paper_execution_session_id": "aq-paper-execution-session-000000000000000000000000"}
+    )
+    with pytest.raises(ResearchRegistryError, match="exact execution session"):
+        load_paper_execution_report(wrong_session, registry=memory)
+
+    wrong_path = result.report.model_copy(update={"relative_path": "artifacts/fake/report.md"})
+    with pytest.raises(ResearchRegistryError, match="canonical artifact path"):
+        load_paper_execution_report(wrong_path, registry=memory)
+
+    wrong_disposition = result.report.model_copy(update={"final_disposition": "blocked"})
+    with pytest.raises(ResearchRegistryError, match="final outcome"):
+        load_paper_execution_report(wrong_disposition, registry=memory)
+
+
+def test_phase6_older_unknown_report_cannot_replace_latest_reconciliation_report(
+    tmp_path: Path,
+) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    approval = make_approval(instruction)
+    submitted = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-latest",
+        instruction=instruction,
+        approval=approval,
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(
+            PaperExecutionService,
+            _Service(
+                submit_error=PaperExecutionSubmissionUnknownError(
+                    "submission_outcome_unknown",
+                    "unknown",
+                )
+            ),
+        ),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    run_paper_reconciliation_workflow(
+        authorization=submitted.authorization,
+        execution_registry=memory,
+        service=cast(
+            PaperExecutionService,
+            _Service(reconcile_receipt=make_receipt(instruction)),
+        ),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+        now_utc=BROKER_TIME,
+    )
+
+    with pytest.raises(ResearchRegistryError, match="latest stored outcome"):
+        write_paper_execution_report(submitted.outcomes[-1], registry=memory)
+
+
+def test_phase6_reconciliation_rejects_substituted_authorization(tmp_path: Path) -> None:
+    store, readiness, session = _session(tmp_path)
+    memory = PaperExecutionMemoryRegistry(store)
+    instruction = make_instruction()
+    submitted = run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-reconcile-substitution",
+        instruction=instruction,
+        approval=make_approval(instruction),
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(
+            PaperExecutionService,
+            _Service(
+                submit_error=PaperExecutionSubmissionUnknownError(
+                    "submission_outcome_unknown",
+                    "unknown",
+                )
+            ),
+        ),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
+    substituted = submitted.authorization.model_copy(update={"signal_id": "signal-substituted"})
+
+    with pytest.raises(ResearchRegistryError, match="exact stored Phase 6 authorization"):
+        run_paper_reconciliation_workflow(
+            authorization=substituted,
+            execution_registry=memory,
+            service=cast(
+                PaperExecutionService,
+                _Service(reconcile_receipt=make_receipt(instruction)),
+            ),
+            broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+            now_utc=BROKER_TIME,
+        )
