@@ -300,4 +300,3 @@ def test_phase6_submission_outcome_slot_is_atomic_under_concurrency(tmp_path: Pa
 
     assert results.count("success") == 1
     assert results.count("paper_submission_outcome_already_recorded") == 1
-
