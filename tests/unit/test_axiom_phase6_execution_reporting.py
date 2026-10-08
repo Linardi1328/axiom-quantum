@@ -89,9 +89,7 @@ def test_phase6_submission_workflow_persists_deterministic_accepted_report(
 
     assert result.outcomes[-1].disposition == "accepted"
     assert result.report.final_disposition == "accepted"
-    assert result.report.outcome_ids == (
-        result.outcomes[-1].paper_execution_outcome_id,
-    )
+    assert result.report.outcome_ids == (result.outcomes[-1].paper_execution_outcome_id,)
     assert service.submit_calls == 1
     content = load_paper_execution_report(result.report, registry=memory)
     assert "Final disposition: accepted" in content
