@@ -35,3 +35,7 @@ Validate reliability of the existing explicitly human-invoked paper execution wo
 * A real owner-run pilot, broker audit, and risk/performance assessment are required before authorizing any change in operational mode.
 
 All exact-head PR gates: focused tests, Ruff, Ruff format, MyPy src/tests, full pytest coverage, whitespace check, Betterleaks, genuine CodeRabbit review, exact-head manual approval, squash merge and verified main.
+
+## Slice 2 — synthetic adversarial evidence
+
+`Phase7SafetyProbe` records sanitized expected and observed error/outcome codes and a checksum of a deterministic synthetic fixture. The immutable `Phase7SafetyEvidence` record requires the exact six critical probes in order, no duplicate fixture checksums, and exact stored Phase 5 assessment lineage. A probe is marked passed only if expected and observed codes match. The record is always `synthetic_fixture`; passing it cannot represent a paper-broker observation or authorize trading. Automated tests additionally exercise invalid/missing probes, failed outcomes, and forged sources. The broker is never invoked.
