@@ -246,10 +246,13 @@ class PaperExecutionMemoryRegistry:
         canonical = PaperSubmissionAuthorization.model_validate(
             authorization.model_dump(mode="python")
         )
-        if self.load_authorization(
-            canonical.experiment_id,
-            canonical.paper_submission_authorization_id,
-        ) != canonical:
+        if (
+            self.load_authorization(
+                canonical.experiment_id,
+                canonical.paper_submission_authorization_id,
+            )
+            != canonical
+        ):
             self._error(
                 "paper_submission_authorization_claim_link_mismatch",
                 "submission claim must reference the exact stored authorization.",
