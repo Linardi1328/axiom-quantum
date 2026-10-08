@@ -597,20 +597,29 @@ def test_phase6_report_load_rejects_render_io_and_content_mismatches(
         with pytest.raises(ResearchRegistryError, match="artifact checksum"):
             load_paper_execution_report(result.report, registry=memory)
 
-    def fail_read_text(_path: Path, *_args: object, **_kwargs: object) -> str:
-        raise OSError("synthetic read failure")
+    report_path = store.artifact_path(
+        result.authorization.experiment_id,
+        f"axiom_paper_execution_report_{result.report.final_outcome_id}.md",
+    )
+    real_read_text = Path.read_text
+
+    def fail_report_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == report_path:
+            raise OSError("synthetic read failure")
+        return real_read_text(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(Path, "read_text", fail_read_text)
+        patch.setattr(Path, "read_text", fail_report_read)
         with pytest.raises(ResearchRegistryError, match="could not be loaded"):
             load_paper_execution_report(result.report, registry=memory)
 
+    def alter_report_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == report_path:
+            return "different stored content\n"
+        return real_read_text(path, *args, **kwargs)
+
     with monkeypatch.context() as patch:
-        patch.setattr(
-            Path,
-            "read_text",
-            lambda *_args, **_kwargs: "different stored content\n",
-        )
+        patch.setattr(Path, "read_text", alter_report_read)
         with pytest.raises(ResearchRegistryError, match="content does not match"):
             load_paper_execution_report(result.report, registry=memory)
 
