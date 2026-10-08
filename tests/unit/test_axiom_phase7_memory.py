@@ -185,3 +185,22 @@ def test_different_paper_dates_are_distinct_and_sorted(tmp_path: Path) -> None:
         item.session.observation_date for item in memory.list_pilots(session.experiment_id)
     ] == [date(2026, 10, 8), date(2026, 10, 9)]
     assert len(memory.list_pilot_ids(session.experiment_id)) == 2
+
+
+def test_memory_rejects_symlinks_and_directories_that_hide_evidence(
+    tmp_path: Path,
+) -> None:
+    session, execution = _parents(tmp_path)
+    memory = Phase7ValidationMemoryRegistry(execution.store)
+    memory.record_session(session)
+    directory = memory.store.experiment_dir(session.experiment_id)
+    memory.store.write_json(session.experiment_id, "innocent.json", {"test": True})
+    link = directory / "axiom_phase7_validation_pilot_hidden.json"
+    link.symlink_to(directory / "innocent.json")
+    with pytest.raises(ValueError, match="unsafe Phase 7 evidence artifact"):
+        memory.list_pilot_ids(session.experiment_id)
+    link.unlink()
+    hidden = directory / "axiom_phase7_validation_safety_hidden"
+    hidden.mkdir()
+    with pytest.raises(ValueError, match="unsafe Phase 7 evidence artifact"):
+        memory.list_safety_ids(session.experiment_id)
