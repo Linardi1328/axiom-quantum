@@ -38,9 +38,7 @@ class Phase7PaperPilotObservation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["axiom-paper-validation-pilot-v1"] = (
-        "axiom-paper-validation-pilot-v1"
-    )
+    schema_version: Literal["axiom-paper-validation-pilot-v1"] = "axiom-paper-validation-pilot-v1"
     pilot_observation_id: str
     session: Phase7ValidationSession
     validation_session_id: str
@@ -52,7 +50,7 @@ class Phase7PaperPilotObservation(BaseModel):
     broker_artifact_checksum: str | None
     incident_codes: tuple[IncidentCode, ...] = ()
     attestation_ref: str
-    human_reviewed: Literal[True] = True
+    human_reviewed: Literal[True]
     evidence_source: Literal["operator_attested_paper_broker"] = (
         "operator_attested_paper_broker"
     )
@@ -140,6 +138,7 @@ def build_phase7_pilot_observation(
     session: Phase7ValidationSession,
     state: PilotState,
     attestation_ref: str,
+    human_reviewed: bool,
     registry: PaperExecutionMemoryRegistry,
     abstain_reason: AbstainReason | None = None,
     outcome: PaperExecutionOutcome | None = None,
@@ -173,7 +172,7 @@ def build_phase7_pilot_observation(
         "broker_artifact_checksum": broker_artifact_checksum,
         "incident_codes": incident_codes,
         "attestation_ref": attestation_ref,
-        "human_reviewed": True,
+        "human_reviewed": human_reviewed,
         "evidence_source": "operator_attested_paper_broker",
         "broker_verification": "not_independently_verified",
         "execution_authority": "none",
