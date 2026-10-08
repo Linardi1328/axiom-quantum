@@ -156,8 +156,7 @@ def _evaluate_records(
     executed = tuple(item for item in pilots if item.state == "execution_recorded")
     pilot_count = len(pilots)
     market_count = sum(
-        _is_xnys_market_session(item.session.observation_date.isoformat())
-        for item in pilots
+        _is_xnys_market_session(item.session.observation_date.isoformat()) for item in pilots
     )
     abstention_count = sum(item.state == "abstained" for item in pilots)
     accepted_count = sum(item.accepted_order for item in executed)
