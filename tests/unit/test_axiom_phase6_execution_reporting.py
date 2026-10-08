@@ -603,20 +603,28 @@ def test_phase6_report_load_rejects_render_io_and_content_mismatches(
     )
     real_read_text = Path.read_text
 
-    def fail_report_read(path: Path, *args: object, **kwargs: object) -> str:
+    def fail_report_read(
+        path: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
         if path == report_path:
             raise OSError("synthetic read failure")
-        return real_read_text(path, *args, **kwargs)
+        return real_read_text(path, encoding=encoding, errors=errors)
 
     with monkeypatch.context() as patch:
         patch.setattr(Path, "read_text", fail_report_read)
         with pytest.raises(ResearchRegistryError, match="could not be loaded"):
             load_paper_execution_report(result.report, registry=memory)
 
-    def alter_report_read(path: Path, *args: object, **kwargs: object) -> str:
+    def alter_report_read(
+        path: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
         if path == report_path:
             return "different stored content\n"
-        return real_read_text(path, *args, **kwargs)
+        return real_read_text(path, encoding=encoding, errors=errors)
 
     with monkeypatch.context() as patch:
         patch.setattr(Path, "read_text", alter_report_read)
