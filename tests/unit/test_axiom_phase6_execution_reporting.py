@@ -191,21 +191,28 @@ def test_phase6_submission_workflow_refuses_duplicate_authorization_use(
     instruction = make_instruction()
     approval = make_approval(instruction)
     service = _Service(submit_receipt=make_receipt(instruction))
-    kwargs = {
-        "assessment": session.assessment,
-        "invocation_id": "phase6-report-duplicate",
-        "instruction": instruction,
-        "approval": approval,
-        "readiness_registry": readiness,
-        "execution_registry": memory,
-        "service": cast(PaperExecutionService, service),
-        "broker": cast(PaperBrokerProtocol, FakePaperBroker()),
-    }
-
-    run_paper_submission_workflow(**kwargs)
+    run_paper_submission_workflow(
+        assessment=session.assessment,
+        invocation_id="phase6-report-duplicate",
+        instruction=instruction,
+        approval=approval,
+        readiness_registry=readiness,
+        execution_registry=memory,
+        service=cast(PaperExecutionService, service),
+        broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+    )
 
     with pytest.raises(ResearchRegistryError, match="already been consumed"):
-        run_paper_submission_workflow(**kwargs)
+        run_paper_submission_workflow(
+            assessment=session.assessment,
+            invocation_id="phase6-report-duplicate",
+            instruction=instruction,
+            approval=approval,
+            readiness_registry=readiness,
+            execution_registry=memory,
+            service=cast(PaperExecutionService, service),
+            broker=cast(PaperBrokerProtocol, FakePaperBroker()),
+        )
     assert service.submit_calls == 1
 
 
