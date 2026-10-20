@@ -283,7 +283,11 @@ def evaluate_and_store_phase3b(
                 for exit_session in assessment_exit_sessions
             )
         )
-        if not membership_verified or not training_purge_verified or not interwindow_purge_verified:
+        if (
+            not membership_verified
+            or not training_purge_verified
+            or not interwindow_purge_verified
+        ):
             raise_research_error(
                 ResearchRegistryError,
                 "phase3b_fold_manifest_invalid",
