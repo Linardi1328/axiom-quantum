@@ -90,6 +90,29 @@ def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(
     assert first.experiment_id == second.experiment_id
     assert fitted_rows == [len(fold.training_rows) for fold in folds for _ in range(3)] * 2
     assert first.fold_count == len(folds)
+    fold_manifest = json.loads((first.artifact_directory / "fold_manifest.json").read_text())
+    assert len(fold_manifest["folds"]) == len(folds)
+    observed_assessments: set[str] = set()
+    for index, (record, fold) in enumerate(zip(fold_manifest["folds"], folds, strict=True)):
+        expected_training = [
+            supervised.labels.iloc[row]["session"].isoformat() for row in fold.training_rows
+        ]
+        expected_assessment = [
+            supervised.labels.iloc[row]["session"].isoformat() for row in fold.assessment_rows
+        ]
+        assert record["training_prediction_sessions"] == expected_training
+        assert record["assessment_prediction_sessions"] == expected_assessment
+        assert record["purge_sessions"] == [value.isoformat() for value in fold.purge_sessions]
+        assert record["training_to_assessment_outcome_purge_verified"] is True
+        assert record["assessment_to_assessment_outcome_purge_verified"] is True
+        assert record["previous_assessment_last_exit"] == (
+            folds[index - 1].assessment_last_exit.isoformat() if index else None
+        )
+        assert record["training_last_exit"] < record["assessment_first_prediction"]
+        if index:
+            assert record["previous_assessment_last_exit"] < record["assessment_first_prediction"]
+        assert observed_assessments.isdisjoint(expected_assessment)
+        observed_assessments.update(expected_assessment)
     metrics = json.loads((first.artifact_directory / "metrics.json").read_text())
     diagnostics = json.loads((first.artifact_directory / "diagnostics.json").read_text())
     assert len(metrics["fold_results"]) == len(folds)
