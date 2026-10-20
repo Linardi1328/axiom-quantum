@@ -230,22 +230,86 @@ def evaluate_and_store_phase3b(
             ResearchRegistryError, "phase3b_model_missing", "frozen registered model is missing"
         )
     runtime = _runtime_lineage()
-    fold_payload = [
-        {
-            "index": fold.index,
-            "training_first_prediction": supervised.labels.iloc[0]["session"],
-            "training_last_prediction": fold.training_last_prediction,
-            "training_last_exit": fold.training_last_exit,
-            "training_rows": len(fold.training_rows),
-            "purge_sessions": fold.purge_sessions,
-            "assessment_first_prediction": fold.assessment_first_prediction,
-            "assessment_last_prediction": fold.assessment_last_prediction,
-            "assessment_last_exit": fold.assessment_last_exit,
-            "assessment_rows": len(fold.assessment_rows),
-            "outcome_purge_verified": fold.training_last_exit < fold.assessment_first_prediction,
-        }
-        for fold in folds
-    ]
+    # Persist exact fold membership as well as boundaries so a reviewer can
+    # independently audit the disjoint assessment and expanding training contract.
+    fold_payload: list[dict[str, object]] = []
+    seen_assessments: set[date] = set()
+    previous_assessment_last_exit: date | None = None
+    for fold in folds:
+        training_labels = supervised.labels.iloc[list(fold.training_rows)]
+        purge_labels = supervised.labels.iloc[list(fold.purge_rows)]
+        assessment_labels = supervised.labels.iloc[list(fold.assessment_rows)]
+        training_sessions = tuple(cast(date, item) for item in training_labels["session"].to_list())
+        purge_sessions = tuple(cast(date, item) for item in purge_labels["session"].to_list())
+        assessment_sessions = tuple(
+            cast(date, item) for item in assessment_labels["session"].to_list()
+        )
+        if not training_sessions or not purge_sessions or not assessment_sessions:
+            raise_research_error(
+                ResearchRegistryError, "phase3b_folds_invalid", "fold membership is empty"
+            )
+        training_exit_sessions = tuple(
+            cast(date, item) for item in training_labels["exit_session"].to_list()
+        )
+        assessment_exit_sessions = tuple(
+            cast(date, item) for item in assessment_labels["exit_session"].to_list()
+        )
+        training_purge_verified = all(
+            exit_session < fold.assessment_first_prediction
+            for exit_session in training_exit_sessions
+        )
+        interwindow_purge_verified = (
+            previous_assessment_last_exit is None
+            or previous_assessment_last_exit < fold.assessment_first_prediction
+        )
+        training_set = set(training_sessions)
+        purge_set = set(purge_sessions)
+        assessment_set = set(assessment_sessions)
+        membership_verified = (
+            len(training_set) == len(training_sessions)
+            and len(purge_set) == len(purge_sessions) == config.purge_rows
+            and len(assessment_set) == len(assessment_sessions)
+            and not training_set.intersection(purge_set | assessment_set)
+            and not purge_set.intersection(assessment_set)
+            and seen_assessments.isdisjoint(assessment_set)
+            and training_sessions[-1] == fold.training_last_prediction
+            and training_exit_sessions[-1] == fold.training_last_exit
+            and purge_sessions == fold.purge_sessions
+            and assessment_sessions[0] == fold.assessment_first_prediction
+            and assessment_sessions[-1] == fold.assessment_last_prediction
+            and assessment_exit_sessions[-1] == fold.assessment_last_exit
+            and all(
+                exit_session < boundary.phase2_final_test_first_prediction_session
+                for exit_session in assessment_exit_sessions
+            )
+        )
+        if not membership_verified or not training_purge_verified or not interwindow_purge_verified:
+            raise_research_error(
+                ResearchRegistryError,
+                "phase3b_fold_manifest_invalid",
+                "fold membership or outcome purge does not satisfy the approved research contract",
+            )
+        fold_payload.append(
+            {
+                "index": fold.index,
+                "training_first_prediction": training_sessions[0],
+                "training_last_prediction": fold.training_last_prediction,
+                "training_last_exit": fold.training_last_exit,
+                "training_rows": len(training_sessions),
+                "training_prediction_sessions": training_sessions,
+                "purge_sessions": purge_sessions,
+                "assessment_first_prediction": fold.assessment_first_prediction,
+                "assessment_last_prediction": fold.assessment_last_prediction,
+                "assessment_last_exit": fold.assessment_last_exit,
+                "assessment_rows": len(assessment_sessions),
+                "assessment_prediction_sessions": assessment_sessions,
+                "previous_assessment_last_exit": previous_assessment_last_exit,
+                "training_to_assessment_outcome_purge_verified": training_purge_verified,
+                "assessment_to_assessment_outcome_purge_verified": interwindow_purge_verified,
+            }
+        )
+        seen_assessments.update(assessment_set)
+        previous_assessment_last_exit = fold.assessment_last_exit
     identity = {
         "schema_version": SCHEMA_VERSION,
         "parent_dataset_id": config.parent_dataset_id,
@@ -264,10 +328,6 @@ def evaluate_and_store_phase3b(
         "runtime": runtime.model_dump(mode="json"),
     }
     experiment_id = f"aq-p3b-{sha256_json(identity)[:24]}"
-    if any(not item["outcome_purge_verified"] for item in fold_payload):
-        raise_research_error(
-            ResearchRegistryError, "phase3b_purge_invalid", "fold purge validation failed"
-        )
     results: list[dict[str, object]] = []
     diagnostics: list[dict[str, object]] = []
     for fold in folds:
