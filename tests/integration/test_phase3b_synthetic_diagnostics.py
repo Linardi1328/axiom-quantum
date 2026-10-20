@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +13,7 @@ from spy_market_agent.datasets.labels import build_forward_label_set
 from spy_market_agent.datasets.models import LabelSet, TradingCostAssumptions
 from spy_market_agent.market_data.models import MarketDataBatch
 from spy_market_agent.research import phase3b
+from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.research.campaign import ResearchCampaignConfig
 from spy_market_agent.research.features import (
     build_research_feature_matrix,
@@ -90,6 +92,31 @@ def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(
     assert first.experiment_id == second.experiment_id
     assert fitted_rows == [len(fold.training_rows) for fold in folds for _ in range(3)] * 2
     assert first.fold_count == len(folds)
+    # Direct evaluation must also fail closed if a provided fold was corrupted.
+    corrupted_purge = (
+        replace(folds[0], purge_sessions=folds[0].purge_sessions[:-1]),
+        *folds[1:],
+    )
+    corrupted_interwindow = (
+        folds[0],
+        replace(
+            folds[1],
+            assessment_first_prediction=folds[0].assessment_last_exit,
+        ),
+        *folds[2:],
+    )
+    for invalid_folds in (corrupted_purge, corrupted_interwindow):
+        with pytest.raises(ResearchRegistryError):
+            evaluate_and_store_phase3b(
+                config=config,
+                market_data=sliced,
+                supervised=supervised,
+                boundary=boundary,
+                folds=invalid_folds,
+                unassessed_rows=unassessed,
+                artifact_root=Path("artifacts/research"),
+                repository_root=tmp_path,
+            )
     fold_manifest = json.loads((first.artifact_directory / "fold_manifest.json").read_text())
     assert len(fold_manifest["folds"]) == len(folds)
     observed_assessments: set[str] = set()
