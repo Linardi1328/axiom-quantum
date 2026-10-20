@@ -437,6 +437,7 @@ def _verify_parent_campaign(
 
 
 def _reject_artifact_root_symlinks(path: Path, repository_root: Path) -> None:
+    repository_root = repository_root.resolve()
     if ".." in path.parts:
         raise_research_error(
             ResearchArtifactError, "phase3b_path_traversal", "artifact root contains traversal"

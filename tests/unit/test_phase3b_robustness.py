@@ -164,6 +164,9 @@ def test_evidence_rejects_symlink_and_path_traversal(tmp_path: Path) -> None:
         _reject_artifact_root_symlinks(Path("artifacts/linked"), tmp_path)
     with pytest.raises(ResearchArtifactError):
         _reject_artifact_root_symlinks(Path("artifacts/../escape"), tmp_path)
+    root_alias = tmp_path / "root-alias"
+    root_alias.symlink_to(tmp_path)
+    _reject_artifact_root_symlinks(tmp_path / "artifacts/research", root_alias)
 
 
 def test_phase3b_cli_is_manual_and_has_no_operational_options(
