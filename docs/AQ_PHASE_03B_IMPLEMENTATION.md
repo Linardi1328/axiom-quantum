@@ -37,7 +37,7 @@ The runner writes under ignored `artifacts/research/phase3b/<experiment-id>/`:
 | --- | --- |
 | `config.json` | Frozen configuration snapshot. |
 | `lineage.json` | Parent dataset/campaign, protected boundary, feature/model/label/runtime identity. |
-| `fold_manifest.json` | Training, six purged sessions, assessment and exit boundaries; unassessed terminal rows. |
+| `fold_manifest.json` | Exact ordered training, six purged, and assessment prediction sessions; training/assessment exit boundaries; explicit training-to-assessment and inter-window outcome-purge proofs; unassessed terminal rows. |
 | `metrics.json` | Per-fold fixed-model metrics, same-window differences and descriptive aggregates. |
 | `diagnostics.json` | Regime cells, train-derived volatility threshold, feature medians and PSI. |
 | `findings.md` | Sanitized development-only limitations and NO CANDIDATE PROMOTION status. |
