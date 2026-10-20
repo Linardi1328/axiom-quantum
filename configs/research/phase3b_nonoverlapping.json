@@ -1,0 +1,19 @@
+{
+  "schema_version": "aq-phase3b-diagnostics-v1",
+  "parent_dataset_id": "spy-v2p1-900ca75371bf05e25b1935b5",
+  "parent_canonical_checksum": "3fbaed8976d4aa1bc8d9029c955aa663b61acbea1be30bcf7a5e730a0b99df6c",
+  "parent_campaign_id": "spy-v2p3-dev-1f9a68f3dce8df02e3645468",
+  "candidate_id": "logistic_regression_research_00_calibration_none",
+  "feature_policy": "baseline_plus_drawdown_position",
+  "initial_training_rows": 756,
+  "purge_rows": 6,
+  "assessment_rows": 126,
+  "minimum_partial_rows": 63,
+  "minimum_aggregate_folds": 3,
+  "threshold": 0.5,
+  "psi_bins": 10,
+  "psi_epsilon": 0.000001,
+  "small_regime_cell_rows": 30,
+  "random_seed": 42,
+  "execution_authority": "none"
+}
