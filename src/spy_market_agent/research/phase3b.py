@@ -133,6 +133,7 @@ def run_phase3b(
 ) -> Phase3BResult:
     """Use only verified local parent bars. No network, broker or trading calls occur."""
     root = (repository_root or Path.cwd()).resolve()
+    _reject_artifact_root_symlinks(artifact_root, root)
     validate_phase2_final_test_isolation(
         tuple(path.as_posix() for path in (manifest_path, data_root, config_path, artifact_root))
     )
@@ -326,7 +327,7 @@ def evaluate_and_store_phase3b(
             )
         )
     summary = _summarize_results(results, folds, config.minimum_aggregate_folds)
-    report = _report(experiment_id, folds, summary, unassessed_rows)
+    report = _report(experiment_id, folds, results, summary, unassessed_rows)
     payloads: dict[str, object] = {
         "config.json": config.model_dump(mode="json"),
         "lineage.json": {
@@ -347,6 +348,7 @@ def evaluate_and_store_phase3b(
         "diagnostics.json": {"schema_version": SCHEMA_VERSION, "fold_diagnostics": diagnostics},
     }
     store = ResearchArtifactStore(artifact_root / "phase3b", repository_root=repository_root)
+    _reject_artifact_root_symlinks(artifact_root / "phase3b", repository_root)
     _persist_evidence(store, experiment_id, payloads, report)
     return Phase3BResult(experiment_id, store.experiment_dir(experiment_id), len(folds))
 
@@ -359,6 +361,7 @@ def _verify_parent_campaign(
     artifact_root: Path, repository_root: Path, config: Phase3BConfig
 ) -> dict[str, Any]:
     """Read only the accepted development campaign index and immutable contracts."""
+    _reject_artifact_root_symlinks(artifact_root, repository_root)
     store = ResearchArtifactStore(artifact_root, repository_root=repository_root)
     index = store.read_json(config.parent_campaign_id, "artifact_index.json")
     if (
@@ -431,6 +434,27 @@ def _verify_parent_campaign(
                 "frozen model definition differs from accepted campaign",
             )
     return manifest
+
+
+def _reject_artifact_root_symlinks(path: Path, repository_root: Path) -> None:
+    if ".." in path.parts:
+        raise_research_error(
+            ResearchArtifactError, "phase3b_path_traversal", "artifact root contains traversal"
+        )
+    candidate = path if path.is_absolute() else repository_root / path
+    try:
+        relative = candidate.relative_to(repository_root)
+    except ValueError:
+        raise_research_error(
+            ResearchArtifactError, "phase3b_root_escape", "artifact root is outside repository"
+        )
+    current = repository_root
+    for component in relative.parts:
+        current = current / component
+        if current.is_symlink():
+            raise_research_error(
+                ResearchArtifactError, "phase3b_root_symlink", "artifact root contains a symlink"
+            )
 
 
 def _metric_differences(
@@ -609,7 +633,11 @@ def _summarize_results(
 
 
 def _report(
-    experiment_id: str, folds: tuple[DisjointFold, ...], summary: dict[str, object], unassessed: int
+    experiment_id: str,
+    folds: tuple[DisjointFold, ...],
+    results: list[dict[str, object]],
+    summary: dict[str, object],
+    unassessed: int,
 ) -> str:
     comparison = summary.get("explored_period_comparison")
     comparison_text = (
@@ -617,6 +645,32 @@ def _report(
         if comparison is not None
         else "Explored-period comparison unsupported with fewer than three valid folds."
     )
+    rows = [
+        "| Fold | Assessment | Candidate AUC | Candidate negative recall | "
+        "Candidate predicted-positive rate | Prevalence AUC | Fixed logistic AUC | "
+        "Fixed boosting AUC |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for fold, result in zip(folds, results, strict=True):
+        by_name = cast(dict[str, dict[str, Any]], result["metrics"])
+        candidate = by_name[MODEL_NAMES[1]]
+        rows.append(
+            "| "
+            + " | ".join(
+                (
+                    str(fold.index),
+                    f"{fold.assessment_first_prediction} to {fold.assessment_last_prediction}",
+                    _display_metric(candidate["metrics"]["roc_auc"]["value"]),
+                    _display_metric(candidate["negative_recall"]),
+                    _display_metric(candidate["predicted_positive_rate"]),
+                    _display_metric(by_name[MODEL_NAMES[0]]["metrics"]["roc_auc"]["value"]),
+                    _display_metric(by_name[MODEL_NAMES[2]]["metrics"]["roc_auc"]["value"]),
+                    _display_metric(by_name[MODEL_NAMES[3]]["metrics"]["roc_auc"]["value"]),
+                )
+            )
+            + " |"
+        )
+    table = "\n".join(rows)
     return (
         f"# Phase 3B descriptive findings — {experiment_id}\n\n"
         "Development-only retrospective research. The previously opened Phase 2 final test "
@@ -625,6 +679,10 @@ def _report(
         f"Folds: {len(folds)}. Terminal unassessed rows: {unassessed}. "
         f"Aggregate status: {summary['status']}.\n\n"
         f"{comparison_text}\n\n"
+        "## Fixed per-fold comparisons\n\n"
+        f"{table}\n\n"
+        "Undefined AUC values are shown as undefined; review metrics.json for reasons, "
+        "class counts, log loss, Brier score, same-window differences, and warnings.\n\n"
         "Disjoint prediction and inter-window label outcomes are not independent experiments. "
         "Labels overlap inside each block; expanding training history and serial market "
         "regimes add dependence. "
@@ -634,6 +692,10 @@ def _report(
         "paper orders, "
         "unattended execution, live trading, or other trading authority.\n"
     )
+
+
+def _display_metric(value: object) -> str:
+    return "undefined" if value is None else f"{float(cast(float, value)):.4f}"
 
 
 def _persist_evidence(

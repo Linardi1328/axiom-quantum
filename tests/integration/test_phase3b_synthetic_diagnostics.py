@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from spy_market_agent.datasets.labels import build_forward_label_set
@@ -25,7 +26,9 @@ from unit.v2_phase2_helpers import write_synthetic_phase1_dataset
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(tmp_path: Path) -> None:
+def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manifest_path = write_synthetic_phase1_dataset(
         tmp_path, start=date(2019, 1, 2), end=date(2025, 12, 31)
     )
@@ -54,6 +57,15 @@ def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(tmp_pat
         protected_first_session=boundary.phase2_final_test_first_prediction_session,
         source_sessions=tuple(sliced.data["session"].to_list()),
     )
+    original_fit = phase3b.fit_development_estimator
+    fitted_rows: list[int] = []
+
+    def checked_fit(estimator: object, X: pd.DataFrame, y: pd.Series, *, model_name: str) -> object:
+        fitted_rows.append(len(X))
+        assert len(X) == len(y)
+        return original_fit(estimator, X, y, model_name=model_name)
+
+    monkeypatch.setattr(phase3b, "fit_development_estimator", checked_fit)
     config = load_phase3b_config(ROOT / "configs/research/phase3b_nonoverlapping.json")
     first = evaluate_and_store_phase3b(
         config=config,
@@ -76,6 +88,7 @@ def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(tmp_pat
         repository_root=tmp_path,
     )
     assert first.experiment_id == second.experiment_id
+    assert fitted_rows == [len(fold.training_rows) for fold in folds for _ in range(3)] * 2
     assert first.fold_count == len(folds)
     metrics = json.loads((first.artifact_directory / "metrics.json").read_text())
     diagnostics = json.loads((first.artifact_directory / "diagnostics.json").read_text())
@@ -86,7 +99,10 @@ def test_full_phase3b_synthetic_evaluation_is_repeatable_and_descriptive(tmp_pat
         "logistic_regression",
         "gradient_boosting",
     }
-    assert "NO CANDIDATE PROMOTION" in (first.artifact_directory / "findings.md").read_text()
+    report = (first.artifact_directory / "findings.md").read_text()
+    assert "NO CANDIDATE PROMOTION" in report
+    assert "Candidate negative recall" in report
+    assert "Fixed boosting AUC" in report
     first_diagnostic = diagnostics["fold_diagnostics"][0]
     assert first_diagnostic["regimes"]["trend_200"]
     assert first_diagnostic["regimes"]["drawdown"]

@@ -20,7 +20,10 @@ from spy_market_agent.research.errors import (
     WalkForwardSplitError,
 )
 from spy_market_agent.research.phase3b import (
+    _display_metric,
+    _finite_frame,
     _persist_evidence,
+    _reject_artifact_root_symlinks,
     _verify_parent_campaign,
     load_phase3b_config,
 )
@@ -156,6 +159,11 @@ def test_evidence_rejects_symlink_and_path_traversal(tmp_path: Path) -> None:
     (directory / "metrics.json").symlink_to(tmp_path / "outside.json")
     with pytest.raises(ResearchArtifactError):
         store.write_json("aq-p3b-link", "metrics.json", {})
+    (tmp_path / "artifacts" / "linked").symlink_to(tmp_path / "artifacts" / "research")
+    with pytest.raises(ResearchArtifactError):
+        _reject_artifact_root_symlinks(Path("artifacts/linked"), tmp_path)
+    with pytest.raises(ResearchArtifactError):
+        _reject_artifact_root_symlinks(Path("artifacts/../escape"), tmp_path)
 
 
 def test_phase3b_cli_is_manual_and_has_no_operational_options(
@@ -234,3 +242,9 @@ def test_psi_handles_degenerate_training_and_train_derived_bins() -> None:
     bins = drift["bins"]
     assert isinstance(bins, tuple)
     assert len(bins) == 10
+
+
+def test_nonfinite_features_and_undefined_report_metric_are_explicit() -> None:
+    assert not _finite_frame(pd.DataFrame({"feature": [1.0, float("inf")]}))
+    assert not _finite_frame(pd.DataFrame({"feature": [1.0, float("nan")]}))
+    assert _display_metric(None) == "undefined"
