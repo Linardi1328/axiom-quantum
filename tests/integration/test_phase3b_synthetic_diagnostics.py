@@ -13,8 +13,8 @@ from spy_market_agent.datasets.labels import build_forward_label_set
 from spy_market_agent.datasets.models import LabelSet, TradingCostAssumptions
 from spy_market_agent.market_data.models import MarketDataBatch
 from spy_market_agent.research import phase3b
-from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.research.campaign import ResearchCampaignConfig
+from spy_market_agent.research.errors import ResearchRegistryError
 from spy_market_agent.research.features import (
     build_research_feature_matrix,
     build_research_supervised_dataset,
