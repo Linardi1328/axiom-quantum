@@ -112,15 +112,17 @@ def test_late_context_or_wrong_signal_session_fails_closed() -> None:
 def test_missing_duplicate_or_tampered_source_proofs_fail_closed() -> None:
     proofs = _proofs()
     assert "incomplete_context_source_proofs" in _assess(proofs=proofs[:-1]).reasons
-    assert "unknown_or_duplicate_context_source" in _assess(
-        proofs=(*proofs[:-1], proofs[0])
-    ).reasons
-    assert "source_snapshot_mismatch" in _assess(
-        proofs=(replace(proofs[0], snapshot_id="different"), *proofs[1:])
-    ).reasons
-    assert "source_checksum_invalid" in _assess(
-        proofs=(replace(proofs[0], checksum_sha256="invalid"), *proofs[1:])
-    ).reasons
+    assert (
+        "unknown_or_duplicate_context_source" in _assess(proofs=(*proofs[:-1], proofs[0])).reasons
+    )
+    assert (
+        "source_snapshot_mismatch"
+        in _assess(proofs=(replace(proofs[0], snapshot_id="different"), *proofs[1:])).reasons
+    )
+    assert (
+        "source_checksum_invalid"
+        in _assess(proofs=(replace(proofs[0], checksum_sha256="invalid"), *proofs[1:])).reasons
+    )
 
 
 def test_unverified_rights_quality_and_future_availability_fail_closed() -> None:
