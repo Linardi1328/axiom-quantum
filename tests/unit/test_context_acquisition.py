@@ -209,7 +209,7 @@ def test_request_scope_refuses_unsupported_source_policy(overrides: dict[str, ob
 
 @pytest.mark.parametrize(
     "root",
-    [Path("../outside"), Path("/tmp/outside"), Path("."), Path("other"), Path("data/sub")],
+    [Path("../outside"), Path("/tmp/outside"), Path(), Path("other"), Path("data/sub")],
 )
 def test_unsafe_storage_root_is_denied(root: Path) -> None:
     """Reject traversal and absolute writes before any network client exists."""
