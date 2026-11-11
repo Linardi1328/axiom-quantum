@@ -16,7 +16,7 @@ from alpaca.data.timeframe import TimeFrame
 from requests import Response, Session
 
 from spy_market_agent.market_data.acquisition import (
-    AcquisitionRequest,
+    StockBarsRequestProtocol,
     Clock,
     MarketDataCredentials,
     PaginationMetadata,
@@ -74,7 +74,7 @@ class AlpacaMarketDataProvider:
 
     def fetch_raw_snapshot(
         self,
-        request: AcquisitionRequest,
+        request: StockBarsRequestProtocol,
         *,
         credentials: MarketDataCredentials,
         clock: Clock,
@@ -104,7 +104,7 @@ class AlpacaMarketDataProvider:
             if symbol_bars is None:
                 symbol_bars = []
             if not isinstance(symbol_bars, list):
-                raise ProviderMalformedResponse("Alpaca bars for SPY must be a list.")
+                raise ProviderMalformedResponse("Alpaca bars for the requested symbol must be a list.")
             next_page_token = page.get("next_page_token")
             if next_page_token is not None and not isinstance(next_page_token, str):
                 raise ProviderMalformedResponse("Alpaca next_page_token must be a string or null.")
@@ -208,7 +208,7 @@ def _install_timeout_session(
     client._session = cast(Session, _TimeoutSession(timeout_seconds))
 
 
-def _build_stock_bars_params(request: AcquisitionRequest) -> dict[str, Any]:
+def _build_stock_bars_params(request: StockBarsRequestProtocol) -> dict[str, Any]:
     stock_request = StockBarsRequest(
         symbol_or_symbols=request.symbol,
         start=datetime.combine(request.start_date, datetime_time.min, tzinfo=UTC),
