@@ -16,12 +16,12 @@ from alpaca.data.timeframe import TimeFrame
 from requests import Response, Session
 
 from spy_market_agent.market_data.acquisition import (
-    StockBarsRequestProtocol,
     Clock,
     MarketDataCredentials,
     PaginationMetadata,
     ProviderIdentity,
     RawAcquisitionSnapshot,
+    StockBarsRequestProtocol,
 )
 from spy_market_agent.market_data.errors import (
     PaginationFailure,
@@ -104,7 +104,9 @@ class AlpacaMarketDataProvider:
             if symbol_bars is None:
                 symbol_bars = []
             if not isinstance(symbol_bars, list):
-                raise ProviderMalformedResponse("Alpaca bars for the requested symbol must be a list.")
+                raise ProviderMalformedResponse(
+                    "Alpaca bars for the requested symbol must be a list."
+                )
             next_page_token = page.get("next_page_token")
             if next_page_token is not None and not isinstance(next_page_token, str):
                 raise ProviderMalformedResponse("Alpaca next_page_token must be a string or null.")
