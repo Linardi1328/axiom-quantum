@@ -111,14 +111,15 @@ def assess_binary_context_preflight(
             or source_proof.available_as_of.utcoffset() is None
         ):
             reasons.append("naive_context_availability")
-        elif source_proof.available_as_of > bundle.as_of:
-            reasons.append("source_available_after_context_snapshot")
-        elif (
-            signal_cutoff.tzinfo is not None
-            and signal_cutoff.utcoffset() is not None
-            and source_proof.available_as_of > signal_cutoff
-        ):
-            reasons.append("source_available_after_signal_cutoff")
+        else:
+            if source_proof.available_as_of > bundle.as_of:
+                reasons.append("source_available_after_context_snapshot")
+            if (
+                signal_cutoff.tzinfo is not None
+                and signal_cutoff.utcoffset() is not None
+                and source_proof.available_as_of > signal_cutoff
+            ):
+                reasons.append("source_available_after_signal_cutoff")
 
     definitions = {
         definition.feature_id: definition for definition in MI2B_SPY_CONTEXT_FEATURE_DEFINITIONS
