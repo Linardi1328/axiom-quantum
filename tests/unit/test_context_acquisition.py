@@ -35,7 +35,7 @@ from spy_market_agent.market_data.errors import (
     UnsafeDataPath,
     UnsupportedMarketSymbol,
 )
-from spy_market_agent.market_data.manifest import sha256_bytes
+from spy_market_agent.market_data.manifest import canonical_json_bytes, sha256_bytes
 
 NOW = datetime(2024, 1, 8, 22, 0, tzinfo=UTC)
 DATES = (
@@ -161,11 +161,7 @@ def test_qqq_iwm_manifest_is_immutable_and_explicitly_unverified(
     assert manifest.execution_authority == "none"
     assert manifest.manifest_sha256 is not None
     assert manifest.manifest_sha256 == sha256_bytes(
-        json.dumps(
-            {**manifest.model_dump(mode="json"), "manifest_sha256": None},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode() + b"\\n"
+        canonical_json_bytes(manifest.model_copy(update={"manifest_sha256": None}))
     )
     raw = tmp_path / manifest.generated_paths["raw"]
     canonical = tmp_path / manifest.generated_paths["canonical"]
