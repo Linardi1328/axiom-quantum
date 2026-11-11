@@ -17,6 +17,7 @@ from spy_market_agent.intelligence.legacy_spy import LEGACY_SPY_SERIES_ID
 from spy_market_agent.market_data.models import SCHEMA_VERSION as MARKET_DATA_SCHEMA_VERSION
 from spy_market_agent.research.binary_context_alignment import (
     BINARY_CONTEXT_ALIGNED_COLUMNS,
+    BinaryContextHistoryAlignment,
     align_binary_context_history,
 )
 from spy_market_agent.research.binary_context_preflight import (
@@ -142,7 +143,7 @@ def _align(
     cutoffs: dict[date, datetime] | None = None,
     proofs: dict[date, tuple[ContextSourceProof, ...]] | None = None,
     protected: date = PROTECTED,
-):
+) -> BinaryContextHistoryAlignment:
     return align_binary_context_history(
         supervised=supervised if supervised is not None else _supervised(),
         history=history if history is not None else _history(),
