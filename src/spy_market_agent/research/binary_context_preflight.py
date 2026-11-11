@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 from spy_market_agent.datasets.models import LABEL_SCHEMA_VERSION
 from spy_market_agent.intelligence.context import MI2A_REQUIRED_CONTEXT_IDS
@@ -71,7 +72,8 @@ def assess_binary_context_preflight(
     else:
         if bundle.as_of > signal_cutoff:
             reasons.append("context_available_after_signal_cutoff")
-        if signal_cutoff.date() != prediction_session:
+        market_session_date = signal_cutoff.astimezone(ZoneInfo("America/New_York")).date()
+        if market_session_date != prediction_session:
             reasons.append("prediction_session_cutoff_mismatch")
     if bundle.anchor_session != prediction_session:
         reasons.append("context_prediction_session_mismatch")
@@ -109,6 +111,8 @@ def assess_binary_context_preflight(
             or source_proof.available_as_of.utcoffset() is None
         ):
             reasons.append("naive_context_availability")
+        elif source_proof.available_as_of > bundle.as_of:
+            reasons.append("source_available_after_context_snapshot")
         elif (
             signal_cutoff.tzinfo is not None
             and signal_cutoff.utcoffset() is not None
