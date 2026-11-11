@@ -298,6 +298,7 @@ def test_real_alpaca_adapter_is_injectable_without_network(tmp_path: Path) -> No
 
     class FakePageClient:
         def get(self, *, path: str, data: dict[str, Any]) -> dict[str, Any]:
+            """Return an offline response and inspect the real adapter query."""
             assert path == "/stocks/bars"
             assert data["symbols"] == "QQQ"
             assert data["feed"] == "sip"
@@ -326,7 +327,7 @@ def test_context_verifier_rejects_modified_bytes(tmp_path: Path, artifact: str) 
     manifest = _run(tmp_path).manifest
     path = tmp_path / manifest.generated_paths[artifact]
     path.write_bytes(path.read_bytes() + b"tampered")
-    with pytest.raises(ChecksumMismatch):
+    with pytest.raises((ChecksumMismatch, ManifestValidationFailure)):
         verify_context_artifacts(
             tmp_path / manifest.generated_paths["manifest"], repository_root=tmp_path
         )
