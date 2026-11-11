@@ -48,6 +48,7 @@ CHECKSUM = "b" * 64
 
 
 def _supervised() -> ResearchSupervisedDataset:
+    """Construct a minimal synthetic binary target and feature-history fixture."""
     features = pd.DataFrame({"session": list(SESSIONS)})
     for name in RESEARCH_FEATURE_COLUMNS:
         features[name] = [0.10, 0.20]
@@ -77,6 +78,7 @@ def _supervised() -> ResearchSupervisedDataset:
 
 
 def _bundle(session: date) -> SPYContextFeatureBundle:
+    """Produce timestamped MI context features for a synthetic market session."""
     as_of = datetime.combine(session, datetime.min.time(), tzinfo=UTC) + timedelta(hours=22)
     snapshots = tuple(f"s-{session.isoformat()}-{i}" for i in range(4))
     by_source = dict(zip(MI2A_REQUIRED_CONTEXT_IDS, snapshots, strict=True))
@@ -110,6 +112,7 @@ def _bundle(session: date) -> SPYContextFeatureBundle:
 def _history(
     bundles: tuple[SPYContextFeatureBundle, ...] | None = None,
 ) -> SPYContextFeatureHistory:
+    """Build a synthetic MI context history with matching SPY lineage."""
     return SPYContextFeatureHistory(
         source_market_data_checksum=CHECKSUM,
         source_schema_version=MARKET_DATA_SCHEMA_VERSION,
@@ -118,6 +121,7 @@ def _history(
 
 
 def _cutoffs() -> dict[date, datetime]:
+    """Supply explicit per-session New York market-close cutoff instants."""
     return {
         session: datetime.combine(session, datetime.min.time(), tzinfo=UTC) + timedelta(hours=23)
         for session in SESSIONS
@@ -125,6 +129,7 @@ def _cutoffs() -> dict[date, datetime]:
 
 
 def _proofs() -> dict[date, tuple[ContextSourceProof, ...]]:
+    """Create synthetic declared provenance for each required context snapshot."""
     proofs: dict[date, tuple[ContextSourceProof, ...]] = {}
     for session in SESSIONS:
         bundle = _bundle(session)
@@ -153,6 +158,7 @@ def _align(
     protected: date = PROTECTED,
     source_sessions: tuple[date, ...] = SOURCE_SESSIONS,
 ) -> BinaryContextHistoryAlignment:
+    """Run the offline alignment with optional malformed synthetic inputs."""
     return align_binary_context_history(
         supervised=supervised if supervised is not None else _supervised(),
         history=history if history is not None else _history(),
@@ -164,6 +170,7 @@ def _align(
 
 
 def test_aligned_rows_are_deterministic_features_only() -> None:
+    """Return the exact canonical, feature-only row layout on eligible inputs."""
     result = _align()
     assert result.status == BinaryContextStatus.ELIGIBLE_FOR_DEVELOPMENT
     assert result.reasons == ()
@@ -179,6 +186,7 @@ def test_aligned_rows_are_deterministic_features_only() -> None:
 
 
 def test_source_checksum_mismatch_fails_before_alignment() -> None:
+    """Fail closed when contextual lineage differs from the binary SPY input."""
     history = replace(_history(), source_market_data_checksum="c" * 64)
     result = _align(history=history)
     assert result.status == BinaryContextStatus.INELIGIBLE
@@ -187,6 +195,7 @@ def test_source_checksum_mismatch_fails_before_alignment() -> None:
 
 
 def test_protected_label_exits_are_rejected_without_partial_features() -> None:
+    """Never build features if a label exit reaches the protected window."""
     supervised = _supervised()
     supervised.labels.loc[1, "exit_session"] = PROTECTED
     result = _align(supervised=supervised)
@@ -196,6 +205,7 @@ def test_protected_label_exits_are_rejected_without_partial_features() -> None:
 
 
 def test_missing_or_extra_context_sessions_fail_closed() -> None:
+    """Deny missing or excess history, source proof, and cutoff coverage."""
     missing = _history(bundles=(_bundle(SESSIONS[0]),))
     assert _align(history=missing).reasons == ("context_session_coverage_mismatch",)
     cutoffs = _cutoffs()
@@ -207,6 +217,7 @@ def test_missing_or_extra_context_sessions_fail_closed() -> None:
 
 
 def test_late_source_refuses_entire_history_not_just_bad_row() -> None:
+    """Discard every row when one feature source arrived too late."""
     proofs = _proofs()
     late = replace(
         proofs[SESSIONS[1]][0],
@@ -221,6 +232,7 @@ def test_late_source_refuses_entire_history_not_just_bad_row() -> None:
 
 
 def test_context_after_signal_cutoff_is_rejected() -> None:
+    """Reject context assembled after the prediction decision cutoff."""
     cutoffs = _cutoffs()
     cutoffs[SESSIONS[1]] = _bundle(SESSIONS[1]).as_of - timedelta(seconds=1)
     result = _align(cutoffs=cutoffs)
@@ -229,6 +241,7 @@ def test_context_after_signal_cutoff_is_rejected() -> None:
 
 
 def test_nonfinite_binary_feature_is_rejected() -> None:
+    """Never expose non-finite baseline features to a candidate model."""
     supervised = _supervised()
     supervised.features.loc[0, RESEARCH_FEATURE_COLUMNS[0]] = float("nan")
     result = _align(supervised=supervised)
@@ -237,6 +250,7 @@ def test_nonfinite_binary_feature_is_rejected() -> None:
 
 
 def test_binary_entry_and_exit_must_match_exact_source_session_offsets() -> None:
+    """Require actual next-session entry and six-session outcome exit."""
     supervised = _supervised()
     supervised.labels.loc[0, "entry_session"] = date(2026, 1, 14)
     result = _align(supervised=supervised)
@@ -245,6 +259,7 @@ def test_binary_entry_and_exit_must_match_exact_source_session_offsets() -> None
 
 
 def test_protected_source_dates_or_truncated_calendar_fail_closed() -> None:
+    """Reject protected sessions and calendars too short for the label."""
     protected_source = _align(source_sessions=(*SOURCE_SESSIONS, PROTECTED))
     assert protected_source.reasons == ("protected_source_session_present",)
     assert protected_source.feature_rows == ()
