@@ -114,8 +114,7 @@ def assess_binary_context_preflight(
             reasons.append("source_available_after_signal_cutoff")
 
     definitions = {
-        definition.feature_id: definition
-        for definition in MI2B_SPY_CONTEXT_FEATURE_DEFINITIONS
+        definition.feature_id: definition for definition in MI2B_SPY_CONTEXT_FEATURE_DEFINITIONS
     }
     selected = {feature.feature_id: feature for feature in bundle.features}
     for feature_id in feature_ids:
