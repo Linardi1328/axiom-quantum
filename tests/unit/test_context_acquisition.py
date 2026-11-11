@@ -23,11 +23,14 @@ from spy_market_agent.market_data.context_acquisition import (
     ContextAcquisitionArtifacts,
     ContextAcquisitionRequest,
     acquire_historical_context_data,
+    verify_context_artifacts,
 )
 from spy_market_agent.market_data.errors import (
     CanonicalizationFailure,
+    ChecksumMismatch,
     ExistingDatasetConflict,
     InvalidAcquisitionRequest,
+    ManifestValidationFailure,
     ProviderMalformedResponse,
     UnsafeDataPath,
     UnsupportedMarketSymbol,
@@ -156,6 +159,14 @@ def test_qqq_iwm_manifest_is_immutable_and_explicitly_unverified(
     assert manifest.point_in_time_status == "UNVERIFIED"
     assert manifest.usage_rights_status == "UNVERIFIED"
     assert manifest.execution_authority == "none"
+    assert manifest.manifest_sha256 is not None
+    assert manifest.manifest_sha256 == sha256_bytes(
+        json.dumps(
+            {**manifest.model_dump(mode="json"), "manifest_sha256": None},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode() + b"\\n"
+    )
     raw = tmp_path / manifest.generated_paths["raw"]
     canonical = tmp_path / manifest.generated_paths["canonical"]
     summary = tmp_path / manifest.generated_paths["manifest"]
@@ -164,6 +175,7 @@ def test_qqq_iwm_manifest_is_immutable_and_explicitly_unverified(
     assert sha256_bytes(canonical.read_bytes()) == manifest.canonical_sha256
     assert json.loads(summary.read_text())["dataset_id"] == manifest.dataset_id
     assert symbol in canonical.read_text()
+    assert verify_context_artifacts(summary, repository_root=tmp_path) == manifest
     assert not (tmp_path / "data" / "canonical" / "alpaca" / "SPY").exists()
     again = _run(tmp_path, request=_request(symbol))
     assert again.manifest == manifest
@@ -199,7 +211,10 @@ def test_request_scope_refuses_unsupported_source_policy(overrides: dict[str, ob
         ContextAcquisitionRequest.model_validate(payload)
 
 
-@pytest.mark.parametrize("root", [Path("../outside"), Path("/tmp/outside")])
+@pytest.mark.parametrize(
+    "root",
+    [Path("../outside"), Path("/tmp/outside"), Path("."), Path("other"), Path("data/sub")],
+)
 def test_unsafe_storage_root_is_denied(root: Path) -> None:
     """Reject traversal and absolute writes before any network client exists."""
     with pytest.raises(UnsafeDataPath):
@@ -292,6 +307,7 @@ def test_real_alpaca_adapter_is_injectable_without_network(tmp_path: Path) -> No
             assert data["feed"] == "sip"
             assert data["adjustment"] == "all"
             assert data["timeframe"] == "1Day"
+            assert data["asof"] == "-"
             return _page("QQQ")
 
     provider = AlpacaMarketDataProvider(
@@ -306,3 +322,59 @@ def test_real_alpaca_adapter_is_injectable_without_network(tmp_path: Path) -> No
     )
     assert result.manifest.row_count == 4
     assert result.manifest.point_in_time_status == "UNVERIFIED"
+
+
+@pytest.mark.parametrize("artifact", ["raw", "canonical", "manifest"])
+def test_context_verifier_rejects_modified_bytes(tmp_path: Path, artifact: str) -> None:
+    """Detect tampering after the original write without any provider contact."""
+    manifest = _run(tmp_path).manifest
+    path = tmp_path / manifest.generated_paths[artifact]
+    path.write_bytes(path.read_bytes() + b"tampered")
+    with pytest.raises(ChecksumMismatch):
+        verify_context_artifacts(
+            tmp_path / manifest.generated_paths["manifest"], repository_root=tmp_path
+        )
+
+
+def test_context_verifier_rejects_wrong_identity_or_missing_artifacts(tmp_path: Path) -> None:
+    """Do not load an absent manifest or trust swapped path identities."""
+    manifest = _run(tmp_path).manifest
+    path = tmp_path / manifest.generated_paths["manifest"]
+    with pytest.raises(ManifestValidationFailure):
+        verify_context_artifacts(
+            tmp_path / "data" / "manifests" / "other.json", repository_root=tmp_path
+        )
+    path.unlink()
+    with pytest.raises(ManifestValidationFailure):
+        verify_context_artifacts(path, repository_root=tmp_path)
+
+
+def test_context_daily_bars_reject_intraday_timestamp(tmp_path: Path) -> None:
+    """A valid session date alone does not turn an intraday candle into 1Day."""
+    page = _page("QQQ")
+    bars = page["bars"]
+    assert isinstance(bars, dict)
+    records = bars["QQQ"]
+    assert isinstance(records, list)
+    first = records[0]
+    assert isinstance(first, dict)
+    first["t"] = "2024-01-02T15:30:00Z"
+    with pytest.raises(CanonicalizationFailure, match="New York midnight"):
+        _run(tmp_path, provider=FakeProvider(page))
+    assert not (tmp_path / "data").exists()
+
+
+def test_alpaca_context_does_not_remap_symbols_but_spy_keeps_default() -> None:
+    """No-remapping applies only to QQQ/IWM, never frozen Phase 1 SPY."""
+    from spy_market_agent.market_data.alpaca_provider import _build_stock_bars_params
+
+    assert _build_stock_bars_params(_request())["asof"] == "-"
+    spy = AcquisitionRequest(
+        symbol="SPY",
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 5),
+        feed="sip",
+        adjustment_mode="all",
+        acknowledge_provider_terms=True,
+    )
+    assert "asof" not in _build_stock_bars_params(spy)
