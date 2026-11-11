@@ -13,6 +13,7 @@ from spy_market_agent.intelligence.context_features import (
 )
 from spy_market_agent.intelligence.legacy_spy import LEGACY_SPY_SERIES_ID
 from spy_market_agent.research.binary_context_preflight import (
+    BinaryContextPreflight,
     BinaryContextStatus,
     ContextSourceProof,
     assess_binary_context_preflight,
@@ -74,7 +75,7 @@ def _assess(
     bundle: SPYContextFeatureBundle | None = None,
     cutoff: datetime = CUTOFF,
     proofs: tuple[ContextSourceProof, ...] | None = None,
-):
+) -> BinaryContextPreflight:
     return assess_binary_context_preflight(
         bundle=bundle or _bundle(),
         label_schema=label_schema,
