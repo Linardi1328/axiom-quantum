@@ -76,9 +76,8 @@ def align_binary_context_history(
         or history.source_schema_version != meta.source_schema_version
     ):
         return _reject("binary_source_or_schema_mismatch")
-    if (
-        not isinstance(protected_first_prediction_session, date)
-        or isinstance(protected_first_prediction_session, datetime)
+    if not isinstance(protected_first_prediction_session, date) or isinstance(
+        protected_first_prediction_session, datetime
     ):
         return _reject("invalid_protected_boundary")
 
