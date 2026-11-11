@@ -424,3 +424,82 @@ def acquire_historical_context_data(
         canonical_artifact_created=csv_result.created,
         manifest_artifact_created=manifest_result.created,
     )
+
+
+def verify_context_artifacts(
+    manifest_path: Path, *, repository_root: Path | None = None
+) -> ContextAcquisitionManifest:
+    """Verify saved raw, canonical and manifest bytes without contacting a provider.
+
+    This verifies artifact integrity and internal consistency, NOT historic as-of
+    observability, data-use rights or independent source authenticity.
+    """
+    store = DatasetStore(Path("data"), repository_root=repository_root)
+    location = (
+        manifest_path if manifest_path.is_absolute() else store.repository_root / manifest_path
+    )
+    store.relative_path(location)  # Reject parent symlink/path escape outside data/.
+    if location.is_symlink() or not location.is_file():
+        raise ManifestValidationFailure("context manifest must be a regular existing file.")
+    manifest_bytes = location.read_bytes()
+    try:
+        manifest = ContextAcquisitionManifest.model_validate_json(manifest_bytes)
+    except ValidationError as exc:
+        raise ManifestValidationFailure("context manifest schema is invalid.") from exc
+    if (
+        manifest.manifest_sha256 is None
+        or manifest_bytes != canonical_json_bytes(manifest)
+        or manifest.manifest_sha256
+        != sha256_bytes(canonical_json_bytes(manifest.model_copy(update={"manifest_sha256": None})))
+    ):
+        raise ChecksumMismatch("context manifest checksum or canonical serialization mismatch.")
+    request = ContextAcquisitionRequest(
+        symbol=manifest.symbol,
+        start_date=manifest.start_date,
+        end_date=manifest.end_date,
+        acknowledge_provider_terms=True,
+    )
+    expected = _context_paths(store, request, manifest.dataset_id)
+    if location != expected.manifest_path:
+        raise ManifestValidationFailure("context manifest path does not match its identity.")
+    expected_locations = {
+        "raw": store.relative_path(expected.raw_snapshot_path),
+        "canonical": store.relative_path(expected.canonical_path),
+        "manifest": store.relative_path(expected.manifest_path),
+    }
+    if manifest.generated_paths != expected_locations:
+        raise ManifestValidationFailure("context artifact paths do not match identity.")
+
+    for path in expected.as_tuple():
+        store.relative_path(path)
+        if path.is_symlink() or not path.is_file():
+            raise ManifestValidationFailure("context artifact is missing or a symlink.")
+    raw_bytes = expected.raw_snapshot_path.read_bytes()
+    canonical_bytes = expected.canonical_path.read_bytes()
+    if (
+        sha256_bytes(raw_bytes) != manifest.raw_sha256
+        or sha256_bytes(canonical_bytes) != manifest.canonical_sha256
+    ):
+        raise ChecksumMismatch("context raw or canonical artifact checksum mismatch.")
+    try:
+        snapshot = RawAcquisitionSnapshot.model_validate_json(raw_bytes)
+    except ValidationError as exc:
+        raise ManifestValidationFailure("context raw snapshot schema is invalid.") from exc
+    if (
+        snapshot.retrieval_timestamp != manifest.retrieval_timestamp
+        or snapshot.provider_identity.api_version != manifest.provider_api_version
+        or snapshot.provider_identity.sdk_package_version != manifest.provider_sdk_version
+    ):
+        raise ManifestValidationFailure("context source identity or retrieval time mismatch.")
+    bars = _validate_and_canonicalize(
+        request, snapshot, as_of=manifest.retrieval_timestamp
+    )
+    if (
+        _canonical_csv(bars) != canonical_bytes
+        or manifest.row_count != len(bars)
+        or manifest.first_session != bars[0].session
+        or manifest.last_session != bars[-1].session
+        or _context_dataset_id(request, sha256_bytes(canonical_bytes)) != manifest.dataset_id
+    ):
+        raise ManifestValidationFailure("context canonical bars or dataset identity mismatch.")
+    return manifest
