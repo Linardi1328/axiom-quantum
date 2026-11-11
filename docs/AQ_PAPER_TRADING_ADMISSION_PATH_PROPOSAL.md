@@ -17,7 +17,7 @@
 ## 2. Do not duplicate the Market Intelligence research track
 
 - MI-2A/B/C/D already specify point-in-time context from QQQ, IWM, VIX and US 10-year yield, controlled feature ablations, forward-only calibration and selective abstention.
-- MI-2 concerns three-class `DOWNSIDE/RANGE/UPSIDE` scenarios. The rejected V2 Phase 3 candidate predicts a **binary SPY `t+1` to `t+6` outcome**. Different labels, clocks, artifacts and eligible folds **must not be silently connected**. No MI result grants paper admission.
+- **Code-level compatibility finding:** `research/scenario_labels.py` builds three-class `DOWNSIDE/RANGE/UPSIDE` labels from **anchor close to future close** at predeclared 5/20-session horizons, and `research/context_ablation.py`/`context_forward.py` consume those scenario outcomes. V2 Phase 3B calls `datasets.labels.build_forward_label_set` for the **binary `t+1` open to `t+6` open** outcome. Thus outcome type, price anchor, horizon and evidence identity differ; neither MI metrics nor fitted MI multinomial coefficients can be copied into a V2 binary admission artifact. No MI result grants paper admission.
 - First implementation work is a **read-only compatibility and evidence inventory** of the existing modules. Reuse MI transforms only if feature semantics, source rights, point-in-time availability, adjustments, calendars and identity are demonstrably compatible with the binary research target. Otherwise abort the bridge rather than fabricate a data join.
 
 ## 3. Proposed narrow next research hypothesis (not yet authorized)
