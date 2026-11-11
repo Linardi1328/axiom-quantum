@@ -127,6 +127,7 @@ class ContextStockProvider(Protocol):
         clock: Clock,
     ) -> RawAcquisitionSnapshot:
         """Fetch one explicit market-data snapshot, not a paper-account action."""
+        ...
 
 
 class ContextBar(BaseModel):
