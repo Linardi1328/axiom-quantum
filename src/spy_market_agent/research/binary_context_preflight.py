@@ -104,7 +104,10 @@ def assess_binary_context_preflight(
             reasons.append("unverified_context_quality")
         if not source_proof.usage_rights_verified:
             reasons.append("unverified_context_usage_rights")
-        if source_proof.available_as_of.tzinfo is None or source_proof.available_as_of.utcoffset() is None:
+        if (
+            source_proof.available_as_of.tzinfo is None
+            or source_proof.available_as_of.utcoffset() is None
+        ):
             reasons.append("naive_context_availability")
         elif (
             signal_cutoff.tzinfo is not None
