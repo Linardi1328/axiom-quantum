@@ -293,4 +293,3 @@ def test_naive_signal_cutoff_denied_before_market_close_comparison() -> None:
     result = _align(cutoffs=cutoffs)
     assert result.reasons == ("naive_signal_cutoff",)
     assert result.feature_rows == ()
-
