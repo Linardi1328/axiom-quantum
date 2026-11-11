@@ -129,10 +129,12 @@ def align_binary_context_history(
 
     # Explicitly exclude the formerly opened Phase 2 final-test range before
     # reading any context row, and forbid forward label exits into that range.
-    for prediction, entry, exit_session, target in zip(
+    for prediction, entry, exit_session, gross_return, net_return, target in zip(
         predictions,
         labels["entry_session"].to_list(),
         labels["exit_session"].to_list(),
+        labels["gross_forward_return"].to_list(),
+        labels["net_forward_return"].to_list(),
         labels["target"].to_list(),
         strict=True,
     ):
@@ -147,6 +149,16 @@ def align_binary_context_history(
             and target in (0, 1)
         ):
             return _reject("protected_or_invalid_binary_label_boundary")
+        try:
+            gross_value = float(gross_return)
+            net_value = float(net_return)
+        except (ValueError, TypeError, OverflowError):
+            return _reject("invalid_binary_label_return")
+        if not (math.isfinite(gross_value) and math.isfinite(net_value)):
+            return _reject("nonfinite_binary_label_return")
+        if target != int(net_value > 0.0):
+            return _reject("binary_label_target_mismatch")
+
         source_position = source_index.get(prediction)
         if (
             source_position is None
@@ -173,10 +185,13 @@ def align_binary_context_history(
         # V2 baseline features use the current SPY daily close; before the
         # actual exchange close those inputs could not yet be observed.
         market_close = calendar.session_close(pd.Timestamp(prediction)).to_pydatetime()
-        if cutoff < market_close:
+        if cutoff <= market_close:
             return _reject("binary_features_unavailable_before_session_close")
 
-        baseline_values = tuple(float(frame.at[idx, name]) for name in RESEARCH_FEATURE_COLUMNS)
+        try:
+            baseline_values = tuple(float(frame.at[idx, name]) for name in RESEARCH_FEATURE_COLUMNS)
+        except (ValueError, TypeError, OverflowError):
+            return _reject("invalid_binary_feature")
         if not all(math.isfinite(value) for value in baseline_values):
             return _reject("nonfinite_binary_feature")
         check = assess_binary_context_preflight(
