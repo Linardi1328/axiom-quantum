@@ -97,7 +97,9 @@ class ContextAcquisitionRequest(BaseModel):
         if self.start_date > self.end_date or self.end_date >= utc_now().date():
             raise InvalidAcquisitionRequest("context dates must be historical and ordered.")
         if self.asof is not None:
-            raise InvalidAcquisitionRequest("context acquisition cannot silently remap tickers via asof.")
+            raise InvalidAcquisitionRequest(
+                "context acquisition cannot silently remap tickers via asof."
+            )
         if not self.acknowledge_provider_terms:
             raise InvalidAcquisitionRequest("explicit provider-terms acknowledgement is required.")
         return self
@@ -222,7 +224,7 @@ def _validate_and_canonicalize(
         if not isinstance(bar_list, list):
             raise ProviderMalformedResponse("context symbol bars must be a list.")
         for record in bar_list:
-            if not isinstance(record, dict) or not set(("t", "o", "h", "l", "c", "v")) <= record.keys():
+            if not isinstance(record, dict) or not {"t", "o", "h", "l", "c", "v"} <= record.keys():
                 raise ProviderMalformedResponse("context OHLCV bar is incomplete.")
             try:
                 stamp = pd.Timestamp(record["t"])
@@ -247,8 +249,13 @@ def _validate_and_canonicalize(
                 raise CanonicalizationFailure("context OHLC prices are inconsistent.")
             rows.append(
                 ContextBar(
-                    symbol=cast(Literal["QQQ", "IWM"], request.symbol), session=session, open=open_price,
-                    high=high_price, low=low_price, close=close_price, volume=parsed_volume
+                    symbol=cast(Literal["QQQ", "IWM"], request.symbol),
+                    session=session,
+                    open=open_price,
+                    high=high_price,
+                    low=low_price,
+                    close=close_price,
+                    volume=parsed_volume,
                 )
             )
     if not rows:
@@ -271,7 +278,15 @@ def _canonical_csv(bars: tuple[ContextBar, ...]) -> bytes:
     writer.writerow(CONTEXT_BAR_HEADER)
     for bar in bars:
         writer.writerow(
-            (bar.symbol, bar.session.isoformat(), bar.open, bar.high, bar.low, bar.close, bar.volume)
+            (
+                bar.symbol,
+                bar.session.isoformat(),
+                bar.open,
+                bar.high,
+                bar.low,
+                bar.close,
+                bar.volume,
+            )
         )
     return writer_buffer.getvalue().encode("utf-8")
 
@@ -297,9 +312,13 @@ def acquire_historical_context_data(
     def acquisition_clock() -> datetime:
         return now
 
-    snapshot = provider.fetch_raw_snapshot(request, credentials=credentials, clock=acquisition_clock)
+    snapshot = provider.fetch_raw_snapshot(
+        request, credentials=credentials, clock=acquisition_clock
+    )
     if snapshot.retrieval_timestamp != now:
-        raise ProviderMalformedResponse("context snapshot retrieval time differs from request clock.")
+        raise ProviderMalformedResponse(
+            "context snapshot retrieval time differs from request clock."
+        )
     bars = _validate_and_canonicalize(request, snapshot, as_of=now)
     raw_bytes = raw_snapshot_json_bytes(snapshot)
     csv_bytes = _canonical_csv(bars)
