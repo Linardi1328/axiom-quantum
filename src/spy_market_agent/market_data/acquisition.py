@@ -37,6 +37,22 @@ DEFAULT_DATA_ROOT = Path("./data")
 Clock = Callable[[], datetime]
 
 
+class StockBarsRequestProtocol(Protocol):
+    """Shared *read-only* request shape for one-symbol historical Alpaca bars."""
+
+    symbol: str
+    start_date: date
+    end_date: date
+    timeframe: str
+    provider: str
+    feed: str
+    adjustment_mode: str
+    asof: date | None
+
+    def sanitized_parameters(self) -> dict[str, str | None]:
+        """Return credential-free provider request identity."""
+
+
 def utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
