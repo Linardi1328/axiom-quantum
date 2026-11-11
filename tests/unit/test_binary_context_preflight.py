@@ -111,18 +111,43 @@ def test_late_context_or_wrong_signal_session_fails_closed() -> None:
 
 def test_missing_duplicate_or_tampered_source_proofs_fail_closed() -> None:
     proofs = _proofs()
-    assert "incomplete_context_source_proofs" in _assess(proofs=proofs[:-1]).reasons
-    assert (
-        "unknown_or_duplicate_context_source" in _assess(proofs=(*proofs[:-1], proofs[0])).reasons
+    cases = (
+        (proofs[:-1], "incomplete_context_source_proofs"),
+        ((*proofs[:-1], proofs[0]), "unknown_or_duplicate_context_source"),
+        (
+            (replace(proofs[0], snapshot_id="different"), *proofs[1:]),
+            "source_snapshot_mismatch",
+        ),
+        (
+            (replace(proofs[0], checksum_sha256="invalid"), *proofs[1:]),
+            "source_checksum_invalid",
+        ),
     )
-    assert (
-        "source_snapshot_mismatch"
-        in _assess(proofs=(replace(proofs[0], snapshot_id="different"), *proofs[1:])).reasons
+    for submitted, expected in cases:
+        result = _assess(proofs=submitted)
+        assert result.status == BinaryContextStatus.INELIGIBLE
+        assert expected in result.reasons
+        assert result.values == ()
+
+
+def test_proof_must_be_available_when_context_snapshot_is_built() -> None:
+    proofs = _proofs()
+    late_for_snapshot = replace(
+        proofs[0], available_as_of=AS_OF + timedelta(seconds=30)
     )
-    assert (
-        "source_checksum_invalid"
-        in _assess(proofs=(replace(proofs[0], checksum_sha256="invalid"), *proofs[1:])).reasons
-    )
+    result = _assess(proofs=(late_for_snapshot, *proofs[1:]))
+    assert result.status == BinaryContextStatus.INELIGIBLE
+    assert "source_available_after_context_snapshot" in result.reasons
+    assert result.values == ()
+
+
+def test_utc_midnight_rollover_preserves_new_york_signal_session() -> None:
+    cutoff = datetime(2026, 1, 14, 0, 30, tzinfo=UTC)
+    result = _assess(cutoff=cutoff)
+    assert result.status == BinaryContextStatus.ELIGIBLE_FOR_DEVELOPMENT
+    assert result.execution_authority == "none"
+    assert result.values
+
 
 
 def test_unverified_rights_quality_and_future_availability_fail_closed() -> None:
