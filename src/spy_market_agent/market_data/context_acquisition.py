@@ -16,7 +16,14 @@ from typing import Final, Literal, Protocol, Self, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from spy_market_agent.market_data.acquisition import (
     Clock,
@@ -28,7 +35,9 @@ from spy_market_agent.market_data.acquisition import (
 from spy_market_agent.market_data.calendar import MARKET_TIMEZONE, XNYSCalendar
 from spy_market_agent.market_data.errors import (
     CanonicalizationFailure,
+    ChecksumMismatch,
     InvalidAcquisitionRequest,
+    ManifestValidationFailure,
     ProviderIncompleteResponse,
     ProviderMalformedResponse,
     UnsafeDataPath,
@@ -88,8 +97,10 @@ class ContextAcquisitionRequest(BaseModel):
     @field_validator("data_root")
     @classmethod
     def _validate_root(cls, value: Path) -> Path:
-        if value.is_absolute() or ".." in value.parts or not str(value).strip():
-            raise UnsafeDataPath("context data_root must be a safe repository-relative path.")
+        # The repository ignores data/raw, data/canonical and data/manifests.
+        # Do not allow licensed context files under a committable directory.
+        if value != Path("data"):
+            raise UnsafeDataPath("context data_root must be exactly data/ (ignored).")
         return value
 
     @model_validator(mode="after")
@@ -114,7 +125,7 @@ class ContextAcquisitionRequest(BaseModel):
             "provider": self.provider,
             "feed": self.feed,
             "adjustment_mode": self.adjustment_mode,
-            "asof": None,
+            "asof": "-",
         }
 
 
@@ -168,6 +179,7 @@ class ContextAcquisitionManifest(BaseModel):
     provider_sdk_version: str
     raw_sha256: str
     canonical_sha256: str
+    manifest_sha256: str | None = None
     point_in_time_status: Literal["UNVERIFIED"]
     usage_rights_status: Literal["UNVERIFIED"]
     execution_authority: Literal["none"]
@@ -232,7 +244,12 @@ def _validate_and_canonicalize(
                 raise CanonicalizationFailure("invalid context bar timestamp.") from exc
             if pd.isna(stamp) or stamp.tzinfo is None:
                 raise CanonicalizationFailure("context bar timestamp must be timezone-aware.")
-            session = stamp.tz_convert(ZoneInfo(MARKET_TIMEZONE)).date()
+            market_stamp = stamp.tz_convert(ZoneInfo(MARKET_TIMEZONE))
+            if market_stamp != market_stamp.normalize():
+                raise CanonicalizationFailure(
+                    "context daily-bar timestamp must start at New York midnight."
+                )
+            session = market_stamp.date()
             try:
                 volume = record["v"]
                 if isinstance(volume, bool) or not str(volume).isdigit():
