@@ -106,9 +106,12 @@ def assess_binary_context_preflight(
             reasons.append("unverified_context_usage_rights")
         if proof.available_as_of.tzinfo is None or proof.available_as_of.utcoffset() is None:
             reasons.append("naive_context_availability")
-        elif signal_cutoff.tzinfo is not None and signal_cutoff.utcoffset() is not None:
-            if proof.available_as_of > signal_cutoff:
-                reasons.append("source_available_after_signal_cutoff")
+        elif (
+            signal_cutoff.tzinfo is not None
+            and signal_cutoff.utcoffset() is not None
+            and proof.available_as_of > signal_cutoff
+        ):
+            reasons.append("source_available_after_signal_cutoff")
 
     definitions = {
         definition.feature_id: definition
@@ -119,9 +122,12 @@ def assess_binary_context_preflight(
         feature = selected.get(feature_id)
         if feature is None or definitions[feature_id].source_series_id not in proof_by_id:
             reasons.append("required_context_feature_missing")
-        elif signal_cutoff.tzinfo is not None and signal_cutoff.utcoffset() is not None:
-            if feature.as_of > signal_cutoff:
-                reasons.append("feature_available_after_signal_cutoff")
+        elif (
+            signal_cutoff.tzinfo is not None
+            and signal_cutoff.utcoffset() is not None
+            and feature.as_of > signal_cutoff
+        ):
+            reasons.append("feature_available_after_signal_cutoff")
     if reasons:
         return BinaryContextPreflight(
             BinaryContextStatus.INELIGIBLE, tuple(sorted(set(reasons))), feature_ids, ()
