@@ -45,6 +45,7 @@ class BinaryContextHistoryAlignment:
 
 
 def _reject(*reasons: str) -> BinaryContextHistoryAlignment:
+    """Produce an atomic refusal with no partially aligned rows or sessions."""
     return BinaryContextHistoryAlignment(
         status=BinaryContextStatus.INELIGIBLE,
         reasons=tuple(sorted(set(reasons))),
