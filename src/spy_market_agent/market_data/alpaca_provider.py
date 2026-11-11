@@ -229,7 +229,11 @@ def _build_stock_bars_params(request: StockBarsRequestProtocol) -> dict[str, Any
     params["feed"] = request.feed
     params["sort"] = "asc"
     params["limit"] = DEFAULT_PAGE_LIMIT
-    if request.asof is None:
+    # Context acquisitions explicitly opt out of Alpaca's default ticker
+    # remapping. The frozen SPY request still preserves its existing behavior.
+    if request.sanitized_parameters().get("asof") == "-":
+        params["asof"] = "-"
+    elif request.asof is None:
         params.pop("asof", None)
     return params
 
