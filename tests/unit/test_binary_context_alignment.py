@@ -294,6 +294,7 @@ def test_naive_signal_cutoff_denied_before_market_close_comparison() -> None:
     assert result.reasons == ("naive_signal_cutoff",)
     assert result.feature_rows == ()
 
+
 def test_target_must_equal_sign_of_net_forward_return() -> None:
     """Reject binary targets that disagree with net forward performance."""
     supervised = _supervised()
@@ -321,9 +322,9 @@ def test_nonfinite_gross_or_net_returns_reject_all_rows() -> None:
 def test_nonnumeric_return_and_baseline_feature_fail_closed() -> None:
     """Mutated string values must refuse alignment rather than raise."""
     supervised = _supervised()
-    supervised.labels["gross_forward_return"] = supervised.labels[
-        "gross_forward_return"
-    ].astype("object")
+    supervised.labels["gross_forward_return"] = supervised.labels["gross_forward_return"].astype(
+        "object"
+    )
     supervised.labels.loc[0, "gross_forward_return"] = "invalid"
     result = _align(supervised=supervised)
     assert result.reasons == ("invalid_binary_label_return",)
