@@ -59,6 +59,7 @@ def align_binary_context_history(
     supervised: ResearchSupervisedDataset,
     history: SPYContextFeatureHistory,
     protected_first_prediction_session: date,
+    source_sessions: tuple[date, ...],
     signal_cutoffs: dict[date, datetime],
     source_proofs_by_session: dict[date, tuple[ContextSourceProof, ...]],
 ) -> BinaryContextHistoryAlignment:
@@ -80,6 +81,15 @@ def align_binary_context_history(
         protected_first_prediction_session, datetime
     ):
         return _reject("invalid_protected_boundary")
+    if (
+        not source_sessions
+        or source_sessions != tuple(sorted(set(source_sessions)))
+        or any(isinstance(session, datetime) for session in source_sessions)
+    ):
+        return _reject("invalid_source_session_calendar")
+    if source_sessions[-1] >= protected_first_prediction_session:
+        return _reject("protected_source_session_present")
+    source_index = {session: idx for idx, session in enumerate(source_sessions)}
 
     frame = supervised.features.copy(deep=True)
     labels = supervised.labels.copy(deep=True)
@@ -115,6 +125,14 @@ def align_binary_context_history(
             and target in (0, 1)
         ):
             return _reject("protected_or_invalid_binary_label_boundary")
+        source_position = source_index.get(prediction)
+        if (
+            source_position is None
+            or source_position + 6 >= len(source_sessions)
+            or entry != source_sessions[source_position + 1]
+            or exit_session != source_sessions[source_position + 6]
+        ):
+            return _reject("binary_label_horizon_mismatch")
 
     expected = set(predictions)
     context_sessions = tuple(bundle.anchor_session for bundle in history.bundles)
