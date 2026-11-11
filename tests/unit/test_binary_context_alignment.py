@@ -18,6 +18,7 @@ from spy_market_agent.market_data.models import SCHEMA_VERSION as MARKET_DATA_SC
 from spy_market_agent.research.binary_context_alignment import (
     BINARY_CONTEXT_ALIGNED_COLUMNS,
     BinaryContextHistoryAlignment,
+    BinaryContextHistoryAlignment,
     align_binary_context_history,
 )
 from spy_market_agent.research.binary_context_preflight import (
