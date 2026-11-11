@@ -67,9 +67,7 @@ def _supervised() -> ResearchSupervisedDataset:
 
 
 def _bundle(session: date) -> SPYContextFeatureBundle:
-    as_of = datetime.combine(session, datetime.min.time(), tzinfo=UTC) + timedelta(
-        hours=22
-    )
+    as_of = datetime.combine(session, datetime.min.time(), tzinfo=UTC) + timedelta(hours=22)
     snapshots = tuple(f"s-{session.isoformat()}-{i}" for i in range(4))
     by_source = dict(zip(MI2A_REQUIRED_CONTEXT_IDS, snapshots, strict=True))
     features = tuple(
@@ -111,9 +109,7 @@ def _history(
 
 def _cutoffs() -> dict[date, datetime]:
     return {
-        session: datetime.combine(
-            session, datetime.min.time(), tzinfo=UTC
-        ) + timedelta(hours=23)
+        session: datetime.combine(session, datetime.min.time(), tzinfo=UTC) + timedelta(hours=23)
         for session in SESSIONS
     }
 
