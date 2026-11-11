@@ -132,9 +132,7 @@ def test_missing_duplicate_or_tampered_source_proofs_fail_closed() -> None:
 
 def test_proof_must_be_available_when_context_snapshot_is_built() -> None:
     proofs = _proofs()
-    late_for_snapshot = replace(
-        proofs[0], available_as_of=AS_OF + timedelta(seconds=30)
-    )
+    late_for_snapshot = replace(proofs[0], available_as_of=AS_OF + timedelta(seconds=30))
     result = _assess(proofs=(late_for_snapshot, *proofs[1:]))
     assert result.status == BinaryContextStatus.INELIGIBLE
     assert "source_available_after_context_snapshot" in result.reasons
@@ -147,7 +145,6 @@ def test_utc_midnight_rollover_preserves_new_york_signal_session() -> None:
     assert result.status == BinaryContextStatus.ELIGIBLE_FOR_DEVELOPMENT
     assert result.execution_authority == "none"
     assert result.values
-
 
 
 def test_unverified_rights_quality_and_future_availability_fail_closed() -> None:
