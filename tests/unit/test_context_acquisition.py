@@ -60,8 +60,12 @@ def _request(symbol: str = "QQQ") -> ContextAcquisitionRequest:
 def _record(stamp: str, close: int) -> dict[str, object]:
     """Create one valid, fake adjusted daily bar."""
     return {
-        "t": stamp, "o": close, "h": close + 2,
-        "l": close - 2, "c": close + 1, "v": 1000,
+        "t": stamp,
+        "o": close,
+        "h": close + 2,
+        "l": close - 2,
+        "c": close + 1,
+        "v": 1000,
     }
 
 
@@ -95,17 +99,23 @@ class FakeProvider:
         return RawAcquisitionSnapshot(
             sanitized_request=request.sanitized_parameters(),
             provider_identity=ProviderIdentity(
-                provider_name="alpaca", api_version="v2", sdk_package_name="alpaca-py",
-                sdk_package_version="test", feed=request.feed,
-                adjustment_mode=request.adjustment_mode, access_method="synthetic-page-fixture"
+                provider_name="alpaca",
+                api_version="v2",
+                sdk_package_name="alpaca-py",
+                sdk_package_version="test",
+                feed=request.feed,
+                adjustment_mode=request.adjustment_mode,
+                access_method="synthetic-page-fixture",
             ),
             retrieval_timestamp=clock(),
             source_timezone="UTC",
             provider_response_payload={"pages": [page]},
             pagination=(
                 PaginationMetadata(
-                    page_number=1, request_page_token=None, next_page_token=None,
-                    row_count=len(symbol_rows)
+                    page_number=1,
+                    request_page_token=None,
+                    next_page_token=None,
+                    row_count=len(symbol_rows),
                 ),
             ),
             response_page_count=1,
@@ -131,7 +141,8 @@ def _run(
 
 @pytest.mark.parametrize("symbol", ["QQQ", "IWM"])
 def test_qqq_iwm_manifest_is_immutable_and_explicitly_unverified(
-    tmp_path: Path, symbol: str,
+    tmp_path: Path,
+    symbol: str,
 ) -> None:
     """Persist all three artifacts with truthful rights/as-of statuses."""
     result = _run(tmp_path, request=_request(symbol))
@@ -177,8 +188,10 @@ def test_qqq_iwm_manifest_is_immutable_and_explicitly_unverified(
 def test_request_scope_refuses_unsupported_source_policy(overrides: dict[str, object]) -> None:
     """No unapproved symbol, feed, adjustment or asof can reach provider."""
     payload: dict[str, object] = {
-        "symbol": "QQQ", "start_date": date(2024, 1, 2),
-        "end_date": date(2024, 1, 5), "acknowledge_provider_terms": True,
+        "symbol": "QQQ",
+        "start_date": date(2024, 1, 2),
+        "end_date": date(2024, 1, 5),
+        "acknowledge_provider_terms": True,
     }
     payload.update(overrides)
     with pytest.raises((InvalidAcquisitionRequest, ValueError)):
@@ -190,8 +203,11 @@ def test_unsafe_storage_root_is_denied(root: Path) -> None:
     """Reject traversal and absolute writes before any network client exists."""
     with pytest.raises(UnsafeDataPath):
         ContextAcquisitionRequest(
-            symbol="QQQ", start_date=date(2024, 1, 2), end_date=date(2024, 1, 5),
-            data_root=root, acknowledge_provider_terms=True
+            symbol="QQQ",
+            start_date=date(2024, 1, 2),
+            end_date=date(2024, 1, 5),
+            data_root=root,
+            acknowledge_provider_terms=True,
         )
 
 
@@ -199,8 +215,12 @@ def test_original_phase1_cannot_acquire_context_symbols() -> None:
     """Frozen SPY Phase 1 request and manifest contract remain untouched."""
     with pytest.raises(UnsupportedMarketSymbol):
         AcquisitionRequest(
-            symbol="QQQ", start_date=date(2024, 1, 2), end_date=date(2024, 1, 5),
-            feed="sip", adjustment_mode="all", acknowledge_provider_terms=True
+            symbol="QQQ",
+            start_date=date(2024, 1, 2),
+            end_date=date(2024, 1, 5),
+            feed="sip",
+            adjustment_mode="all",
+            acknowledge_provider_terms=True,
         )
 
 
