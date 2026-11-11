@@ -266,3 +266,31 @@ def test_protected_source_dates_or_truncated_calendar_fail_closed() -> None:
     truncated = _align(source_sessions=SOURCE_SESSIONS[:-2])
     assert truncated.reasons == ("binary_label_horizon_mismatch",)
     assert truncated.feature_rows == ()
+
+
+def test_missing_xnys_source_session_is_not_a_six_session_horizon() -> None:
+    """A gap in a nominally ordered calendar must not shorten target horizons."""
+    incomplete = SOURCE_SESSIONS[:3] + SOURCE_SESSIONS[4:]
+    result = _align(source_sessions=incomplete)
+    assert result.reasons == ("missing_or_nontrading_xnys_source_session",)
+    assert result.feature_rows == ()
+
+
+def test_signal_before_spy_market_close_cannot_use_daily_close_features() -> None:
+    """The binary baseline cannot see a future daily close before XNYS closes."""
+    cutoffs = _cutoffs()
+    cutoffs[SESSIONS[1]] = datetime(2026, 1, 13, 20, 59, tzinfo=UTC)
+    result = _align(cutoffs=cutoffs)
+    assert result.reasons == ("binary_features_unavailable_before_session_close",)
+    assert result.feature_rows == ()
+    assert result.prediction_sessions == ()
+
+
+def test_naive_signal_cutoff_denied_before_market_close_comparison() -> None:
+    """Reject a timezone-naive cutoff without accidentally treating it as UTC."""
+    cutoffs = _cutoffs()
+    cutoffs[SESSIONS[1]] = cutoffs[SESSIONS[1]].replace(tzinfo=None)
+    result = _align(cutoffs=cutoffs)
+    assert result.reasons == ("naive_signal_cutoff",)
+    assert result.feature_rows == ()
+
