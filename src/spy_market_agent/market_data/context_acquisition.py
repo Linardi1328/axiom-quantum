@@ -328,9 +328,7 @@ def _context_paths(
     """Keep artifacts in the same ignored data layout as the original SPY pipeline."""
     segments = ("alpaca", request.symbol, request.timeframe, request.feed, request.adjustment_mode)
     return DatasetArtifactPaths(
-        raw_snapshot_path=store.data_root.joinpath(
-            "raw", *segments, f"{dataset_id}.raw.json"
-        ),
+        raw_snapshot_path=store.data_root.joinpath("raw", *segments, f"{dataset_id}.raw.json"),
         canonical_path=store.data_root.joinpath(
             "canonical", *segments, f"{dataset_id}.canonical.csv"
         ),
@@ -491,9 +489,7 @@ def verify_context_artifacts(
         or snapshot.provider_identity.sdk_package_version != manifest.provider_sdk_version
     ):
         raise ManifestValidationFailure("context source identity or retrieval time mismatch.")
-    bars = _validate_and_canonicalize(
-        request, snapshot, as_of=manifest.retrieval_timestamp
-    )
+    bars = _validate_and_canonicalize(request, snapshot, as_of=manifest.retrieval_timestamp)
     if (
         _canonical_csv(bars) != canonical_bytes
         or manifest.row_count != len(bars)
