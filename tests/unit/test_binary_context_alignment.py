@@ -346,4 +346,3 @@ def test_signal_cutoff_exactly_at_market_close_is_ineligible() -> None:
     result = _align(cutoffs=cutoffs)
     assert result.reasons == ("binary_features_unavailable_before_session_close",)
     assert result.feature_rows == ()
-
