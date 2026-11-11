@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal, cast
 
+import exchange_calendars as xcals
+import pandas as pd
+
 from spy_market_agent.datasets.models import LABEL_SCHEMA_VERSION
 from spy_market_agent.research.binary_context_preflight import (
     BinaryContextStatus,
@@ -84,12 +87,30 @@ def align_binary_context_history(
         return _reject("invalid_protected_boundary")
     if (
         not source_sessions
+        or any(
+            not isinstance(session, date) or isinstance(session, datetime)
+            for session in source_sessions
+        )
         or source_sessions != tuple(sorted(set(source_sessions)))
-        or any(isinstance(session, datetime) for session in source_sessions)
     ):
         return _reject("invalid_source_session_calendar")
     if source_sessions[-1] >= protected_first_prediction_session:
         return _reject("protected_source_session_present")
+
+    # The caller's source sessions must cover every real XNYS session, not just
+    # an arbitrarily increasing list that could shorten the six-session horizon.
+    calendar = xcals.get_calendar("XNYS")
+    try:
+        expected_sessions = tuple(
+            session.date()
+            for session in calendar.sessions_in_range(
+                pd.Timestamp(source_sessions[0]), pd.Timestamp(source_sessions[-1])
+            )
+        )
+    except (ValueError, TypeError):
+        return _reject("invalid_source_session_calendar")
+    if source_sessions != expected_sessions:
+        return _reject("missing_or_nontrading_xnys_source_session")
     source_index = {session: idx for idx, session in enumerate(source_sessions)}
 
     frame = supervised.features.copy(deep=True)
@@ -146,6 +167,15 @@ def align_binary_context_history(
 
     rows: list[tuple[float, ...]] = []
     for idx, prediction in enumerate(predictions):
+        cutoff = signal_cutoffs[prediction]
+        if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            return _reject("naive_signal_cutoff")
+        # V2 baseline features use the current SPY daily close; before the
+        # actual exchange close those inputs could not yet be observed.
+        market_close = calendar.session_close(pd.Timestamp(prediction)).to_pydatetime()
+        if cutoff < market_close:
+            return _reject("binary_features_unavailable_before_session_close")
+
         baseline_values = tuple(float(frame.at[idx, name]) for name in RESEARCH_FEATURE_COLUMNS)
         if not all(math.isfinite(value) for value in baseline_values):
             return _reject("nonfinite_binary_feature")
@@ -153,7 +183,7 @@ def align_binary_context_history(
             bundle=history.bundles[idx],
             label_schema=meta.label_schema_version,
             prediction_session=prediction,
-            signal_cutoff=signal_cutoffs[prediction],
+            signal_cutoff=cutoff,
             source_proofs=source_proofs_by_session[prediction],
         )
         if check.status != BinaryContextStatus.ELIGIBLE_FOR_DEVELOPMENT:
