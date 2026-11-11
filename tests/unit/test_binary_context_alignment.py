@@ -33,6 +33,16 @@ from spy_market_agent.research.features import (
 )
 
 SESSIONS = (date(2026, 1, 12), date(2026, 1, 13))
+SOURCE_SESSIONS = (
+    date(2026, 1, 12),
+    date(2026, 1, 13),
+    date(2026, 1, 14),
+    date(2026, 1, 15),
+    date(2026, 1, 16),
+    date(2026, 1, 20),
+    date(2026, 1, 21),
+    date(2026, 1, 22),
+)
 PROTECTED = date(2026, 2, 2)
 CHECKSUM = "b" * 64
 
@@ -141,11 +151,13 @@ def _align(
     cutoffs: dict[date, datetime] | None = None,
     proofs: dict[date, tuple[ContextSourceProof, ...]] | None = None,
     protected: date = PROTECTED,
+    source_sessions: tuple[date, ...] = SOURCE_SESSIONS,
 ) -> BinaryContextHistoryAlignment:
     return align_binary_context_history(
         supervised=supervised if supervised is not None else _supervised(),
         history=history if history is not None else _history(),
         protected_first_prediction_session=protected,
+        source_sessions=source_sessions,
         signal_cutoffs=cutoffs if cutoffs is not None else _cutoffs(),
         source_proofs_by_session=proofs if proofs is not None else _proofs(),
     )
@@ -222,3 +234,20 @@ def test_nonfinite_binary_feature_is_rejected() -> None:
     result = _align(supervised=supervised)
     assert result.reasons == ("nonfinite_binary_feature",)
     assert result.feature_rows == ()
+
+
+def test_binary_entry_and_exit_must_match_exact_source_session_offsets() -> None:
+    supervised = _supervised()
+    supervised.labels.loc[0, "entry_session"] = date(2026, 1, 14)
+    result = _align(supervised=supervised)
+    assert result.reasons == ("binary_label_horizon_mismatch",)
+    assert result.feature_rows == ()
+
+
+def test_protected_source_dates_or_truncated_calendar_fail_closed() -> None:
+    protected_source = _align(source_sessions=(*SOURCE_SESSIONS, PROTECTED))
+    assert protected_source.reasons == ("protected_source_session_present",)
+    assert protected_source.feature_rows == ()
+    truncated = _align(source_sessions=SOURCE_SESSIONS[:-2])
+    assert truncated.reasons == ("binary_label_horizon_mismatch",)
+    assert truncated.feature_rows == ()
