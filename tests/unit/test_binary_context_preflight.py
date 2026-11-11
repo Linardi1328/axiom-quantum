@@ -28,6 +28,7 @@ SOURCE_BY_ID = dict(zip(MI2A_REQUIRED_CONTEXT_IDS, SNAPSHOTS, strict=True))
 
 
 def _bundle() -> SPYContextFeatureBundle:
+    """Build a canonical synthetic MI feature bundle without provider access."""
     features = tuple(
         ContextFeatureValue(
             policy_id=MI2B_CONTEXT_FEATURE_POLICY_ID,
@@ -56,6 +57,7 @@ def _bundle() -> SPYContextFeatureBundle:
 
 
 def _proofs() -> tuple[ContextSourceProof, ...]:
+    """Produce synthetic source proofs for preflight denial tests."""
     return tuple(
         ContextSourceProof(
             series_id=series,
@@ -76,6 +78,7 @@ def _assess(
     cutoff: datetime = CUTOFF,
     proofs: tuple[ContextSourceProof, ...] | None = None,
 ) -> BinaryContextPreflight:
+    """Evaluate the synthetic fixture with optional deliberately invalid inputs."""
     return assess_binary_context_preflight(
         bundle=bundle or _bundle(),
         label_schema=label_schema,
@@ -86,6 +89,7 @@ def _assess(
 
 
 def test_verified_synthetic_context_is_only_development_eligible() -> None:
+    """Check structural eligibility never implies model or trading approval."""
     result = _assess()
     assert result.status == BinaryContextStatus.ELIGIBLE_FOR_DEVELOPMENT
     assert result.feature_ids == MI2C_QQQ_IWM_FEATURE_IDS
@@ -95,6 +99,7 @@ def test_verified_synthetic_context_is_only_development_eligible() -> None:
 
 
 def test_mi_three_class_schema_cannot_be_reused_as_binary() -> None:
+    """Reject MI scenario-label evidence in binary research."""
     result = _assess(label_schema="mi1-spy-scenario")
     assert result.status == BinaryContextStatus.INELIGIBLE
     assert "binary_label_schema_mismatch" in result.reasons
@@ -102,6 +107,7 @@ def test_mi_three_class_schema_cannot_be_reused_as_binary() -> None:
 
 
 def test_late_context_or_wrong_signal_session_fails_closed() -> None:
+    """Reject context timing and market-session mismatches."""
     late = _assess(cutoff=AS_OF - timedelta(seconds=1))
     assert "context_available_after_signal_cutoff" in late.reasons
     assert late.values == ()
@@ -110,6 +116,7 @@ def test_late_context_or_wrong_signal_session_fails_closed() -> None:
 
 
 def test_missing_duplicate_or_tampered_source_proofs_fail_closed() -> None:
+    """Reject every invalid source proof without exposing feature values."""
     proofs = _proofs()
     cases = (
         (proofs[:-1], "incomplete_context_source_proofs"),
@@ -131,6 +138,7 @@ def test_missing_duplicate_or_tampered_source_proofs_fail_closed() -> None:
 
 
 def test_proof_must_be_available_when_context_snapshot_is_built() -> None:
+    """Prevent a snapshot from using information that did not exist yet."""
     proofs = _proofs()
     late_for_snapshot = replace(proofs[0], available_as_of=AS_OF + timedelta(seconds=30))
     result = _assess(proofs=(late_for_snapshot, *proofs[1:]))
@@ -140,6 +148,7 @@ def test_proof_must_be_available_when_context_snapshot_is_built() -> None:
 
 
 def test_utc_midnight_rollover_preserves_new_york_signal_session() -> None:
+    """Compare the signal's trading session in New York, not UTC."""
     cutoff = datetime(2026, 1, 14, 0, 30, tzinfo=UTC)
     result = _assess(cutoff=cutoff)
     assert result.status == BinaryContextStatus.ELIGIBLE_FOR_DEVELOPMENT
@@ -148,6 +157,7 @@ def test_utc_midnight_rollover_preserves_new_york_signal_session() -> None:
 
 
 def test_unverified_rights_quality_and_future_availability_fail_closed() -> None:
+    """Reject unchecked source quality, rights, and availability."""
     proofs = _proofs()
     bad = replace(
         proofs[0],
@@ -165,6 +175,7 @@ def test_unverified_rights_quality_and_future_availability_fail_closed() -> None
 
 
 def test_naive_timestamps_are_ineligible() -> None:
+    """Reject timezone-naive timestamps before comparing instants."""
     naive = _assess(cutoff=CUTOFF.replace(tzinfo=None))
     assert "naive_signal_cutoff" in naive.reasons
     proofs = _proofs()
