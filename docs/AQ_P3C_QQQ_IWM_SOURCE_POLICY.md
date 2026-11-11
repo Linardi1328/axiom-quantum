@@ -19,8 +19,8 @@ An explicit caller may invoke `acquire_historical_context_data` after separately
 | Timeframe | `1Day` | Match daily research horizon |
 | Adjustment | `all` | Aligned with original SPY adjustment convention, **but not proof of historical adjustment as-of** |
 | Session calendar | XNYS | Require exact nonmissing dates and complete daily candles |
-| Ticker `asof` | Not supported in this first slice | No silent symbol remapping or changed-identity source |
-| Persist | Ignored `data/{raw,canonical,manifests}/alpaca/{QQQ,IWM}/1Day/sip/all/` | Keep raw provider response, normalized bars and integrity metadata out of Git |
+| Ticker `asof` | Explicit `-` to Alpaca | Disable default symbol remapping; never infer entity continuity from ticker alone |
+| Persist | Only ignored `data/{raw,canonical,manifests}/alpaca/{QQQ,IWM}/1Day/sip/all/` | Reject arbitrary root directories to avoid accidentally committing licensed bars |
 | Rights/PIT status | **UNVERIFIED** | Actual legal use and historical availability are separate gates |
 
 The provider must use **market-data-only** API credentials, not trading/paper credentials. It must never retrieve data during CI tests. Every request requires explicit terms acknowledgment before client construction. The adapter is not called by the application runtime or trading agent.
@@ -29,9 +29,10 @@ Primary source: Alpaca [Historical Bars (multi-symbol)](https://docs.alpaca.mark
 
 ## 3. What the acquisition implementation verifies
 
-- Request allows only QQQ/IWM, historical dates, `1Day`, `alpaca`, `sip`, `all`, no `asof`, safe repository-local path, and terms acknowledgment.
+- Request allows only QQQ/IWM, historical dates, `1Day`, `alpaca`, `sip`, `all`, explicit no-remapping token `asof=-`, the ignored `data/` root only, and terms acknowledgment.
 - Reuses bounded Alpaca retries/pagination and timestamps the credential-free raw response. Rejects mismatched request/provenance, foreign symbols, malformed OHLCV, nonpositive/nonfinite prices, invalid volume, duplicates, reordered bars, missing XNYS sessions, and incomplete latest session.
-- Produces stable context CSV fields `symbol,session,open,high,low,close,volume`; computes canonical and raw SHA-256; creates a deterministic dataset ID and metadata manifest. The existing storage layer performs atomic, write-once checksum checks and refuses conflicting artifacts.
+- Rejects bars whose timestamps do not identify the New York daily-interval start (including intraday bars on otherwise valid XNYS sessions).
+- Produces stable context CSV fields `symbol,session,open,high,low,close,volume`; computes canonical, raw, and manifest SHA-256; creates a deterministic dataset ID and metadata manifest. The existing storage layer performs atomic, write-once checksum checks and refuses conflicting artifacts. `verify_context_artifacts` separately re-reads the saved manifest, raw snapshot and CSV, validates their checksums, reconstructed canonical bars, and dataset identity without a provider call.
 - Every manifest records `point_in_time_status=UNVERIFIED`, `usage_rights_status=UNVERIFIED`, `execution_authority=none`. **Do not convert these fields to verified by assumption, code defaults, downloaded timestamps, or a caller-provided boolean.**
 
 ## 4. Blocking conditions for actual historical-feature eligibility
@@ -49,7 +50,7 @@ Primary source: Alpaca [Historical Bars (multi-symbol)](https://docs.alpaca.mark
 1. Review/merge implementation and fake-client tests (Ruff, formatting, MyPy, coverage, Betterleaks, CodeRabbit).
 2. Decide and document required source history, exact start/end dates and lookback needs, costs, entitlements, allowed use, and whether a four-source preflight amendment is scientifically justified.
 3. Obtain **separate explicit owner permission for one or two local data downloads**; only then call the acquisition function using dedicated market-data credentials. The function has no default scheduling.
-4. After download, verify raw/canonical/manifest checksums and historical point-in-time rights. Until this happens, artifacts are quarantine evidence only.
+4. After download, use the new read-only `verify_context_artifacts` function to check saved raw/canonical/manifest checksums and identity, then separately establish historical point-in-time availability and provider rights. Successful checksums **alone** never constitute source authentication or research admission. Until this happens, artifacts are quarantine evidence only.
 5. Freeze numeric candidate selection thresholds and model/fold identity before **separate** real-data training/evaluation authorization.
 6. No automatic model admission, model-connected shadow operation, paper order or live execution. All trading state remains `execution_authority=none` and Phase 3B `NO CANDIDATE PROMOTION`.
 
