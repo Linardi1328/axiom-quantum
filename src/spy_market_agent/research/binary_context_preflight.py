@@ -90,26 +90,26 @@ def assess_binary_context_preflight(
     for series_id, snapshot_id in zip(
         MI2A_REQUIRED_CONTEXT_IDS, bundle.context_snapshot_ids, strict=True
     ):
-        proof = proof_by_id.get(series_id)
-        if proof is None:
+        source_proof = proof_by_id.get(series_id)
+        if source_proof is None:
             reasons.append("missing_source_proof")
             continue
-        if proof.snapshot_id != snapshot_id:
+        if source_proof.snapshot_id != snapshot_id:
             reasons.append("source_snapshot_mismatch")
-        if len(proof.checksum_sha256) != 64 or any(
-            ch not in "0123456789abcdef" for ch in proof.checksum_sha256
+        if len(source_proof.checksum_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in source_proof.checksum_sha256
         ):
             reasons.append("source_checksum_invalid")
-        if not proof.quality_verified:
+        if not source_proof.quality_verified:
             reasons.append("unverified_context_quality")
-        if not proof.usage_rights_verified:
+        if not source_proof.usage_rights_verified:
             reasons.append("unverified_context_usage_rights")
-        if proof.available_as_of.tzinfo is None or proof.available_as_of.utcoffset() is None:
+        if source_proof.available_as_of.tzinfo is None or source_proof.available_as_of.utcoffset() is None:
             reasons.append("naive_context_availability")
         elif (
             signal_cutoff.tzinfo is not None
             and signal_cutoff.utcoffset() is not None
-            and proof.available_as_of > signal_cutoff
+            and source_proof.available_as_of > signal_cutoff
         ):
             reasons.append("source_available_after_signal_cutoff")
 
