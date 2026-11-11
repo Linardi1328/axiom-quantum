@@ -51,6 +51,7 @@ class StockBarsRequestProtocol(Protocol):
 
     def sanitized_parameters(self) -> dict[str, str | None]:
         """Return credential-free provider request identity."""
+        ...
 
 
 def utc_now() -> datetime:
