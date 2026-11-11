@@ -293,3 +293,57 @@ def test_naive_signal_cutoff_denied_before_market_close_comparison() -> None:
     result = _align(cutoffs=cutoffs)
     assert result.reasons == ("naive_signal_cutoff",)
     assert result.feature_rows == ()
+
+def test_target_must_equal_sign_of_net_forward_return() -> None:
+    """Reject binary targets that disagree with net forward performance."""
+    supervised = _supervised()
+    supervised.labels.loc[0, "target"] = 0
+    result = _align(supervised=supervised)
+    assert result.status == BinaryContextStatus.INELIGIBLE
+    assert result.reasons == ("binary_label_target_mismatch",)
+    assert result.feature_rows == ()
+
+
+def test_nonfinite_gross_or_net_returns_reject_all_rows() -> None:
+    """Neither return field can contain NaN or infinity."""
+    for column, value in (
+        ("gross_forward_return", float("nan")),
+        ("net_forward_return", float("inf")),
+    ):
+        supervised = _supervised()
+        supervised.labels.loc[0, column] = value
+        result = _align(supervised=supervised)
+        assert result.reasons == ("nonfinite_binary_label_return",)
+        assert result.feature_rows == ()
+        assert result.prediction_sessions == ()
+
+
+def test_nonnumeric_return_and_baseline_feature_fail_closed() -> None:
+    """Mutated string values must refuse alignment rather than raise."""
+    supervised = _supervised()
+    supervised.labels["gross_forward_return"] = supervised.labels[
+        "gross_forward_return"
+    ].astype("object")
+    supervised.labels.loc[0, "gross_forward_return"] = "invalid"
+    result = _align(supervised=supervised)
+    assert result.reasons == ("invalid_binary_label_return",)
+    assert result.feature_rows == ()
+
+    supervised = _supervised()
+    name = RESEARCH_FEATURE_COLUMNS[0]
+    supervised.features[name] = supervised.features[name].astype("object")
+    supervised.features.loc[0, name] = "invalid"
+    result = _align(supervised=supervised)
+    assert result.reasons == ("invalid_binary_feature",)
+    assert result.feature_rows == ()
+    assert result.prediction_sessions == ()
+
+
+def test_signal_cutoff_exactly_at_market_close_is_ineligible() -> None:
+    """A closing bar is not guaranteed available at the close instant itself."""
+    cutoffs = _cutoffs()
+    cutoffs[SESSIONS[1]] = datetime(2026, 1, 13, 21, 0, tzinfo=UTC)
+    result = _align(cutoffs=cutoffs)
+    assert result.reasons == ("binary_features_unavailable_before_session_close",)
+    assert result.feature_rows == ()
+
