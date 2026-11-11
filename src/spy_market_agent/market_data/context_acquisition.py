@@ -9,16 +9,14 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Final, Literal, Protocol, Self, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-from typing_extensions import Self
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
 
 from spy_market_agent.market_data.acquisition import (
     Clock,
@@ -42,11 +40,11 @@ from spy_market_agent.market_data.storage import (
     raw_snapshot_json_bytes,
 )
 
-CONTEXT_ACQUISITION_SCHEMA = "aq-qqq-iwm-context-acquisition-v1"
+CONTEXT_ACQUISITION_SCHEMA: Final = "aq-qqq-iwm-context-acquisition-v1"
 CONTEXT_SYMBOLS = ("QQQ", "IWM")
 CONTEXT_BAR_HEADER = ("symbol", "session", "open", "high", "low", "close", "volume")
-CONTEXT_PIT_STATUS = "UNVERIFIED"
-CONTEXT_RIGHTS_STATUS = "UNVERIFIED"
+CONTEXT_PIT_STATUS: Final = "UNVERIFIED"
+CONTEXT_RIGHTS_STATUS: Final = "UNVERIFIED"
 
 
 class ContextAcquisitionRequest(BaseModel):
@@ -75,18 +73,14 @@ class ContextAcquisitionRequest(BaseModel):
 
     @field_validator("timeframe", "provider", "feed", "adjustment_mode")
     @classmethod
-    def _validate_policy(cls, value: str, info: object) -> str:
-        from pydantic import ValidationInfo
-
-        if not isinstance(info, ValidationInfo):
-            raise InvalidAcquisitionRequest("invalid context acquisition field metadata.")
+    def _validate_policy(cls, value: str, info: ValidationInfo) -> str:
         normalized = value.strip().lower()
         required = {
             "timeframe": "1day",
             "provider": "alpaca",
             "feed": "sip",
             "adjustment_mode": "all",
-        }[info.field_name]
+        }[cast(str, info.field_name)]
         if normalized != required:
             raise InvalidAcquisitionRequest(f"context {info.field_name} must be {required}.")
         return "1Day" if info.field_name == "timeframe" else normalized
@@ -252,7 +246,7 @@ def _validate_and_canonicalize(
                 raise CanonicalizationFailure("context OHLC prices are inconsistent.")
             rows.append(
                 ContextBar(
-                    symbol=request.symbol, session=session, open=open_price,
+                    symbol=cast(Literal["QQQ", "IWM"], request.symbol), session=session, open=open_price,
                     high=high_price, low=low_price, close=close_price, volume=parsed_volume
                 )
             )
@@ -329,7 +323,7 @@ def acquire_historical_context_data(
     manifest = ContextAcquisitionManifest(
         schema_version=CONTEXT_ACQUISITION_SCHEMA,
         dataset_id=dataset_id,
-        symbol=request.symbol,
+        symbol=cast(Literal["QQQ", "IWM"], request.symbol),
         provider="alpaca",
         feed="sip",
         adjustment_mode="all",
