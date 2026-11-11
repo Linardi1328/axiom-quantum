@@ -119,7 +119,9 @@ def assess_binary_context_preflight(
         feature = selected.get(feature_id)
         if feature is None or definitions[feature_id].source_series_id not in proof_by_id:
             reasons.append("required_context_feature_missing")
-        elif signal_cutoff.tzinfo is not None and signal_cutoff.utcoffset() is not None:\n            if feature.as_of > signal_cutoff:\n                reasons.append("feature_available_after_signal_cutoff")
+        elif signal_cutoff.tzinfo is not None and signal_cutoff.utcoffset() is not None:
+            if feature.as_of > signal_cutoff:
+                reasons.append("feature_available_after_signal_cutoff")
     if reasons:
         return BinaryContextPreflight(
             BinaryContextStatus.INELIGIBLE, tuple(sorted(set(reasons))), feature_ids, ()
