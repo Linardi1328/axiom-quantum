@@ -308,6 +308,38 @@ def _canonical_csv(bars: tuple[ContextBar, ...]) -> bytes:
     return writer_buffer.getvalue().encode("utf-8")
 
 
+def _context_dataset_id(request: ContextAcquisitionRequest, canonical_sha: str) -> str:
+    """Derive context identity without touching the frozen SPY dataset ID."""
+    identity_data = {
+        "schema": CONTEXT_ACQUISITION_SCHEMA,
+        "symbol": request.symbol,
+        "start": request.start_date,
+        "end": request.end_date,
+        "feed": request.feed,
+        "adjustment": request.adjustment_mode,
+        "canonical_sha256": canonical_sha,
+    }
+    return f"aq-ctx-v1-{sha256_bytes(canonical_json_bytes(identity_data))[:24]}"
+
+
+def _context_paths(
+    store: DatasetStore, request: ContextAcquisitionRequest, dataset_id: str
+) -> DatasetArtifactPaths:
+    """Keep artifacts in the same ignored data layout as the original SPY pipeline."""
+    segments = ("alpaca", request.symbol, request.timeframe, request.feed, request.adjustment_mode)
+    return DatasetArtifactPaths(
+        raw_snapshot_path=store.data_root.joinpath(
+            "raw", *segments, f"{dataset_id}.raw.json"
+        ),
+        canonical_path=store.data_root.joinpath(
+            "canonical", *segments, f"{dataset_id}.canonical.csv"
+        ),
+        manifest_path=store.data_root.joinpath(
+            "manifests", *segments, f"{dataset_id}.manifest.json"
+        ),
+    )
+
+
 def acquire_historical_context_data(
     request: ContextAcquisitionRequest,
     *,
@@ -341,22 +373,12 @@ def acquire_historical_context_data(
     csv_bytes = _canonical_csv(bars)
     raw_sha = sha256_bytes(raw_bytes)
     canonical_sha = sha256_bytes(csv_bytes)
-    identity_data = {
-        "schema": CONTEXT_ACQUISITION_SCHEMA,
-        "symbol": request.symbol,
-        "start": request.start_date,
-        "end": request.end_date,
-        "feed": request.feed,
-        "adjustment": request.adjustment_mode,
-        "canonical_sha256": canonical_sha,
-    }
-    dataset_id = f"aq-ctx-v1-{sha256_bytes(canonical_json_bytes(identity_data))[:24]}"
+    dataset_id = _context_dataset_id(request, canonical_sha)
     store = DatasetStore(request.data_root, repository_root=repository_root)
-    segments = ("alpaca", request.symbol, request.timeframe, request.feed, request.adjustment_mode)
-    raw_path = store.data_root.joinpath("raw", *segments, f"{dataset_id}.raw.json")
-    canonical_path = store.data_root.joinpath("canonical", *segments, f"{dataset_id}.canonical.csv")
-    manifest_path = store.data_root.joinpath("manifests", *segments, f"{dataset_id}.manifest.json")
-    paths = DatasetArtifactPaths(raw_path, canonical_path, manifest_path)
+    paths = _context_paths(store, request, dataset_id)
+    raw_path = paths.raw_snapshot_path
+    canonical_path = paths.canonical_path
+    manifest_path = paths.manifest_path
     manifest = ContextAcquisitionManifest(
         schema_version=CONTEXT_ACQUISITION_SCHEMA,
         dataset_id=dataset_id,
@@ -384,6 +406,8 @@ def acquire_historical_context_data(
             "manifest": store.relative_path(manifest_path),
         },
     )
+    manifest_sha = sha256_bytes(canonical_json_bytes(manifest))
+    manifest = manifest.model_copy(update={"manifest_sha256": manifest_sha})
     manifest_bytes = canonical_json_bytes(manifest)
     raw_result, csv_result, manifest_result = store.write_dataset(
         paths=paths,
