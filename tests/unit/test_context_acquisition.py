@@ -20,6 +20,7 @@ from spy_market_agent.market_data.acquisition import (
 )
 from spy_market_agent.market_data.alpaca_provider import AlpacaMarketDataProvider
 from spy_market_agent.market_data.context_acquisition import (
+    ContextAcquisitionArtifacts,
     ContextAcquisitionRequest,
     acquire_historical_context_data,
 )
@@ -128,7 +129,7 @@ def _run(
     request: ContextAcquisitionRequest | None = None,
     provider: FakeProvider | None = None,
     clock: Callable[[], datetime] = _clock,
-):
+) -> ContextAcquisitionArtifacts:
     """Run fake provider only inside a test's isolated local repository."""
     return acquire_historical_context_data(
         request or _request(),
