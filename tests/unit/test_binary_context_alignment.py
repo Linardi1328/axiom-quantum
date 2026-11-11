@@ -18,7 +18,6 @@ from spy_market_agent.market_data.models import SCHEMA_VERSION as MARKET_DATA_SC
 from spy_market_agent.research.binary_context_alignment import (
     BINARY_CONTEXT_ALIGNED_COLUMNS,
     BinaryContextHistoryAlignment,
-    BinaryContextHistoryAlignment,
     align_binary_context_history,
 )
 from spy_market_agent.research.binary_context_preflight import (
@@ -100,7 +99,9 @@ def _bundle(session: date) -> SPYContextFeatureBundle:
     )
 
 
-def _history(bundles: tuple[SPYContextFeatureBundle, ...] | None = None) -> SPYContextFeatureHistory:
+def _history(
+    bundles: tuple[SPYContextFeatureBundle, ...] | None = None,
+) -> SPYContextFeatureHistory:
     return SPYContextFeatureHistory(
         source_market_data_checksum=CHECKSUM,
         source_schema_version=MARKET_DATA_SCHEMA_VERSION,
