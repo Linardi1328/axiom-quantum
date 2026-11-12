@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,14 @@ from spy_market_agent.market_data.errors import (
     UnsupportedMarketSymbol,
 )
 from spy_market_agent.market_data.manifest import canonical_json_bytes, sha256_bytes
+
+
+@pytest.fixture(autouse=True)
+def ignored_repository(tmp_path: Path) -> None:
+    """Use a real ignored test repository, never the owner's data directories."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("data/raw/*\ndata/canonical/*\ndata/manifests/*\n")
+
 
 NOW = datetime(2024, 1, 8, 22, 0, tzinfo=UTC)
 DATES = (
@@ -106,10 +116,13 @@ class FakeProvider:
                 provider_name="alpaca",
                 api_version="v2",
                 sdk_package_name="alpaca-py",
-                sdk_package_version="test",
+                sdk_package_version=version("alpaca-py"),
                 feed=request.feed,
                 adjustment_mode=request.adjustment_mode,
-                access_method="synthetic-page-fixture",
+                access_method=(
+                    "alpaca-py StockHistoricalDataClient low-level get /v2/stocks/bars "
+                    "with bounded requests session timeout"
+                ),
             ),
             retrieval_timestamp=clock(),
             source_timezone="UTC",
@@ -333,8 +346,8 @@ def test_context_verifier_rejects_modified_bytes(tmp_path: Path, artifact: str) 
         )
 
 
-def test_context_verifier_rejects_wrong_identity_or_missing_artifacts(tmp_path: Path) -> None:
-    """Do not load an absent manifest or trust swapped path identities."""
+def test_context_verifier_rejects_missing_manifest_paths(tmp_path: Path) -> None:
+    """Do not load a missing alternate path or a deleted manifest."""
     manifest = _run(tmp_path).manifest
     path = tmp_path / manifest.generated_paths["manifest"]
     with pytest.raises(ManifestValidationFailure):

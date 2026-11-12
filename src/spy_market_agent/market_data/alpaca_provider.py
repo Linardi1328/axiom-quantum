@@ -62,6 +62,7 @@ class AlpacaMarketDataProvider:
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         sleep: Sleep = time.sleep,
+        context_monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if max_retries < 0:
             raise ValueError("max_retries must be nonnegative.")
@@ -71,6 +72,7 @@ class AlpacaMarketDataProvider:
         self._max_retries = max_retries
         self._timeout_seconds = timeout_seconds
         self._sleep = sleep
+        self._context_monotonic = context_monotonic
 
     def fetch_raw_snapshot(
         self,
@@ -79,6 +81,12 @@ class AlpacaMarketDataProvider:
         credentials: MarketDataCredentials,
         clock: Clock,
     ) -> RawAcquisitionSnapshot:
+        from spy_market_agent.market_data.context_contracts import ContextAcquisitionRequest
+
+        if isinstance(request, ContextAcquisitionRequest):
+            from spy_market_agent.market_data.context_transport import fetch_context_snapshot
+
+            return fetch_context_snapshot(self, request, credentials=credentials, clock=clock)
         client = self._client_factory(credentials, self._timeout_seconds)
         params = _build_stock_bars_params(request)
         pages: list[dict[str, Any]] = []
