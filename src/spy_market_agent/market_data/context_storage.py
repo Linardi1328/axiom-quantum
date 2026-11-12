@@ -130,6 +130,7 @@ class ContextStore:
 
     def preflight(self, symbol: str) -> None:
         # Walk existing directories only: invalid source data must not create data/.
+        self._ignored(Path("data/manifests/.context-acquisition-v2.lock"))
         with self._directory(("data", "manifests")) as lock_parent:
             if lock_parent is not None:
                 self._stat(lock_parent, ".context-acquisition-v2.lock")
@@ -304,6 +305,7 @@ class ContextStore:
                         continue
                     if info is not None and self._inode(info) == inode:
                         os.unlink(path.name, dir_fd=parent)
+                        os.fsync(parent)
                 raise
             finally:
                 for descriptor in parents.values():

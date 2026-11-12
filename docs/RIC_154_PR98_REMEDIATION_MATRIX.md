@@ -54,6 +54,16 @@ is unavailable, as explicitly authorized by the owner.
 
 ## Scope and compatibility
 
+CodeRabbit's follow-up review is also addressed: preflight rejects a tracked
+coordination lock before client construction
+(`test_h02_tracked_coordination_lock_denies_client`); owned rollback syncs each
+parent after unlink (`test_h04_rollback_syncs_each_removed_publication`); and
+context clients disable alpaca-py 0.43.5's internal retry count/delay so only the
+outer context budget applies (`test_m02_real_sdk_has_only_context_retry_budget`,
+using the real SDK with intercepted synthetic HTTP 429/504 responses, zero
+network calls, and zero/three outer retries). Other SDK instances retain their
+default retry policy.
+
 The extra context modules split contracts/numerical/wire policy, POSIX storage and
 bounded transport so SPY storage, schemas and dataset identities stay frozen.
 Only `AlpacaMarketDataProvider`'s context dispatch/configuration is extended; its

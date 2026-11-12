@@ -1103,3 +1103,90 @@ def test_h01_repository_root_permissions_fail_before_provider(tmp_path: Path, mo
         assert provider.constructions == 0
     finally:
         tmp_path.chmod(0o700)
+
+
+def test_h02_tracked_coordination_lock_denies_client(tmp_path: Path) -> None:
+    lock = tmp_path / "data/manifests/.context-acquisition-v2.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_bytes(b"")
+    subprocess.run(["git", "add", "-f", "--", str(lock)], cwd=tmp_path, check=True)
+    provider = CountingProvider()
+    with pytest.raises(UnsafeDataPath, match="ignored and untracked"):
+        acquire(tmp_path, provider=provider)
+    assert provider.constructions == 0
+    assert provider.calls == []
+
+
+def test_h04_rollback_syncs_each_removed_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_publish, original_sync = ContextStore._publish, os.fsync
+    syncs: list[tuple[int, int]] = []
+
+    def sync(descriptor: int) -> None:
+        info = os.fstat(descriptor)
+        syncs.append((info.st_dev, info.st_ino))
+        original_sync(descriptor)
+
+    def publish(self: ContextStore, parent: int, path: Path, data: bytes, owned: Any) -> None:
+        if path.name.endswith(".manifest.json"):
+            raise OSError("synthetic manifest publication failure")
+        original_publish(self, parent, path, data, owned)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    monkeypatch.setattr(ContextStore, "_publish", publish)
+    with pytest.raises(AtomicWriteFailure):
+        acquire(tmp_path)
+    for kind in ("raw", "canonical"):
+        parent = tmp_path / f"data/{kind}/alpaca/QQQ/1Day/sip/all"
+        info = parent.stat()
+        # One successful publication sync and one durable rollback sync.
+        assert syncs.count((info.st_dev, info.st_ino)) == 2
+        assert not list(parent.iterdir())
+
+
+@pytest.mark.parametrize("status", [429, 504])
+@pytest.mark.parametrize("retries", [0, 3])
+def test_m02_real_sdk_has_only_context_retry_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, retries: int
+) -> None:
+    from alpaca.data.historical import StockHistoricalDataClient
+    from requests import Response
+
+    from spy_market_agent.market_data.alpaca_provider import _AlpacaStockBarsPageAdapter
+    from spy_market_agent.market_data.errors import (
+        ProviderRateLimitFailure,
+        ProviderUnavailableFailure,
+    )
+
+    client = StockHistoricalDataClient(api_key="fake", secret_key="fake")
+    untouched = StockHistoricalDataClient(api_key="fake", secret_key="fake")
+    default_retries = untouched._retry
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def response(*_args: Any, **_kwargs: Any) -> Response:
+        calls.append(status)
+        result = Response()
+        result.status_code = status
+        result._content = b'{"code":429,"message":"synthetic failure"}'
+        return result
+
+    def forbidden_sdk_sleep(_delay: float) -> None:
+        pytest.fail("SDK retry sleep bypassed context budget")
+
+    monkeypatch.setattr("requests.sessions.Session.request", response)
+    monkeypatch.setattr("alpaca.common.rest.time.sleep", forbidden_sdk_sleep)
+    provider = AlpacaMarketDataProvider(
+        client_factory=lambda *_: _AlpacaStockBarsPageAdapter(client),
+        max_retries=retries,
+        sleep=sleeps.append,
+    )
+    failure = ProviderRateLimitFailure if status == 429 else ProviderUnavailableFailure
+    with pytest.raises(failure):
+        acquire(tmp_path, provider=provider)
+    assert len(calls) == retries + 1
+    assert sleeps == [float(n) for n in range(1, retries + 1)]
+    assert client._retry == 0
+    assert client._retry_wait == 0
+    assert untouched._retry == default_retries == 3

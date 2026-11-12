@@ -115,6 +115,8 @@ original SPY exception behavior remains unchanged.
 
 Budgets: at most 64 pages, 20,000 rows and 32 MiB per serialized artifact; 120 seconds
 elapsed per acquisition, at most three retries and a 30-second request timeout.
+The context SDK client's internal retries/delays are disabled; only the outer
+context retry loop owns the attempt budget. Other SDK clients are unchanged.
 The real context SDK session caps each request/retry timeout to remaining budget;
 monotonic checks run before/after requests and retry delays. Arbitrary injected
 provider Python code must cooperate with timeouts; this is not a process-killing

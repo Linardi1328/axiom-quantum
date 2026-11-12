@@ -296,6 +296,10 @@ def fetch_context_snapshot(
     if failure:
         raise failure("context provider client construction failed.") from None
     if isinstance(client, _AlpacaStockBarsPageAdapter):
+        # alpaca-py 0.43.5 RESTClient retries internally by default. Context's
+        # outer loop must own the entire attempt/sleep budget; leave SPY alone.
+        client._client._retry = 0
+        client._client._retry_wait = 0
 
         class ContextDeadlineSession(_TimeoutSession):
             def request(self, method: str, url: str | bytes, **kwargs: Any) -> Response:
