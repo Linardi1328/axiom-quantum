@@ -46,7 +46,7 @@ with these eight appended in order:
 For lookback n, return is close[t] / close[t-n] - 1. Relative strength subtracts
 SPY's corresponding return. At least 21 aligned, contiguous XNYS closes are
 required. Feature values are recomputed and checked against the supplied bundle;
-SPY's 5/20-session returns must also match its supervised feature row.
+SPY's 1/5/20-session returns must also match its supervised feature row.
 
 ## Evidence and chronology boundary
 
@@ -67,9 +67,21 @@ SPY's 5/20-session returns must also match its supervised feature row.
   weekends and holidays. Input histories end exactly at the prediction session.
 - Frame columns, canonical RangeIndexes, metadata, prediction sessions, context
   coverage and source calendars are checked again because DataFrames are mutable.
+  All 18 research numeric feature columns and both forward-return columns must
+  retain NumPy `float64` dtype; the binary target must retain NumPy `int64` dtype.
+  Float/boolean targets, numeric strings, object columns, nullable extension dtypes
+  and other noncanonical numeric dtypes are rejected without conversion, including
+  noncanonical columns in the two excluded research families.
   Labels require actual t+1 entry and t+6 exit, finite returns and a binary target
   matching the sign of the net return. Source, prediction and exit dates must all
   precede the supplied synthetic protected boundary.
+- Snapshot sessions/closes, bundle sources/proofs/feature IDs/values and the
+  history's bundle sequence must be immutable tuples. Mutable sequence inputs
+  are rejected. Bundle anchors must be unique and chronological. For each of
+  SPY, QQQ and IWM, repeated historical session closes must agree exactly across
+  all bundles under the declared consistent synthetic adjustment policy. Valid
+  individual checksums, rebuilt proofs and recalculated features do not excuse a
+  conflicting overlap; genuinely new session observations remain permitted.
 - Alignment is atomic: any invalid input yields no sessions and no feature rows.
   Fixed rejection text does not echo input values or provider payloads.
 

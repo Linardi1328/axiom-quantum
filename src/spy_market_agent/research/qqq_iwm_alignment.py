@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal, cast
 
+import numpy as np
 import pandas as pd
 
 from spy_market_agent.datasets.models import LABEL_COLUMNS, LABEL_SCHEMA_VERSION
@@ -91,6 +92,15 @@ def _align(
             or not data.index.equals(pd.RangeIndex(meta.row_count))
         ):
             raise ValueError("invalid_frame_schema_or_index")
+    # DataFrames can be mutated after construction. Check every research numeric
+    # column, including unselected families, without repairing or coercing inputs.
+    for data, columns, dtype in (
+        (frame, RESEARCH_FEATURE_COLUMNS, np.dtype("float64")),
+        (labels, ("gross_forward_return", "net_forward_return"), np.dtype("float64")),
+        (labels, ("target",), np.dtype("int64")),
+    ):
+        if any(data[column].dtype != dtype for column in columns):
+            raise ValueError("noncanonical_numeric_dtype")
     predictions = tuple(cast(date, value) for value in frame["session"].to_list())
     require_sessions(predictions)
     if (
@@ -124,7 +134,7 @@ def _align(
         target_sessions = bundle.target.sessions
         if target_sessions != source_sessions[position - len(target_sessions) + 1 : position + 1]:
             raise ValueError("context_source_calendar_mismatch")
-        for lookback in (5, 20):
+        for lookback in (1, 5, 20):
             expected_return = bundle.target.closes[-1] / bundle.target.closes[-lookback - 1] - 1
             if not math.isclose(
                 float(frame.at[idx, f"close_return_{lookback}d"]),

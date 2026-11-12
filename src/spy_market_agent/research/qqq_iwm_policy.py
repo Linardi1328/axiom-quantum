@@ -49,6 +49,11 @@ FROZEN_SOURCE_WINDOW = (date(2018, 1, 2), date(2024, 10, 15), 1708)
 FROZEN_PREDICTION_WINDOW = (date(2018, 3, 29), date(2024, 10, 7), 1642)
 
 
+def _require_immutable_sequences(*values: object) -> None:
+    if any(not isinstance(value, tuple) for value in values):
+        raise ValueError("mutable_or_invalid_sequence")
+
+
 def require_sessions(sessions: tuple[date, ...]) -> None:
     if not sessions or any(type(item) is not date for item in sessions):
         raise ValueError("invalid_session_dates")
@@ -86,6 +91,7 @@ class SyntheticCloseSnapshot:
     adjustment_policy: str = "synthetic_consistent_adjustment_v1"
 
     def __post_init__(self) -> None:
+        _require_immutable_sequences(self.sessions, self.closes)
         if self.evidence_kind != "synthetic_fixture":
             raise ValueError("real_data_eligibility_blocked")
         if self.schema_id != CLOSE_SCHEMA_ID:
@@ -205,6 +211,7 @@ class QQQIWMFeatureBundle:
         return self.target.sessions[-1]
 
     def __post_init__(self) -> None:
+        _require_immutable_sequences(self.sources, self.proofs, self.feature_ids, self.values)
         if (self.policy_id, self.contract_id, self.execution_authority) != (
             POLICY_ID,
             BUNDLE_CONTRACT_ID,
@@ -249,11 +256,26 @@ class QQQIWMFeatureHistory:
     execution_authority: Literal["none"] = "none"
 
     def __post_init__(self) -> None:
+        _require_immutable_sequences(self.bundles)
         if self.contract_id != HISTORY_CONTRACT_ID or self.execution_authority != "none":
             raise ValueError("history_contract_or_authority_mismatch")
         if self.evidence_kind != "synthetic_fixture":
             raise ValueError("real_data_eligibility_blocked")
         if not self.bundles:
             raise ValueError("empty_context_history")
+        anchors: list[date] = []
+        observations: dict[tuple[str, date], float] = {}
         for bundle in self.bundles:
             bundle.__post_init__()
+            anchors.append(bundle.anchor_session)
+            # Individually valid checksums cannot establish agreement across
+            # snapshots. The fixed consistent adjustment policy forbids revisions
+            # to an already observed close for the same instrument and session.
+            for snapshot in (bundle.target, *bundle.sources):
+                for session, close in zip(snapshot.sessions, snapshot.closes, strict=True):
+                    key = (snapshot.series_id, session)
+                    if key in observations and observations[key] != close:
+                        raise ValueError("conflicting_historical_close")
+                    observations[key] = close
+        if anchors != sorted(set(anchors)):
+            raise ValueError("unordered_or_duplicate_bundle_anchors")

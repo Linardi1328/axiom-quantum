@@ -89,7 +89,7 @@ def _supervised() -> ResearchSupervisedDataset:
     )
     for idx, session in enumerate(PREDICTIONS):
         snapshot = _snapshot("SPY", session)
-        for n in (5, 20):
+        for n in (1, 5, 20):
             features.at[idx, f"close_return_{n}d"] = (
                 snapshot.closes[-1] / snapshot.closes[-n - 1] - 1
             )
@@ -418,7 +418,8 @@ def test_history_contract_cannot_admit_real_evidence(mode: str) -> None:
             if mode == "extra_session"
             else tuple(reversed(history.bundles))
         )
-        _rejected(history=replace(history, bundles=bundles))
+        with pytest.raises(ValueError, match="unordered_or_duplicate_bundle_anchors"):
+            replace(history, bundles=bundles)
 
 
 def test_no_real_manifest_or_boolean_can_be_used_as_fixture_evidence() -> None:
@@ -432,3 +433,124 @@ def test_no_real_manifest_or_boolean_can_be_used_as_fixture_evidence() -> None:
                     *bundle.proofs[1:],
                 ),
             )
+
+
+@pytest.mark.parametrize("column", RESEARCH_FEATURE_COLUMNS)
+@pytest.mark.parametrize(
+    "dtype", ["float32", "int64", "object", "Float64", "Int64", "bool", "numeric_strings"]
+)
+def test_noncanonical_feature_dtypes_are_rejected(column: str, dtype: str) -> None:
+    supervised = _supervised()
+    values = supervised.features[column]
+    if dtype in ("int64", "Int64"):
+        values = values.round()
+    supervised.features[column] = values.astype("str" if dtype == "numeric_strings" else dtype)
+    original = supervised.features.copy(deep=True)
+    _rejected(supervised=supervised)
+    pd.testing.assert_frame_equal(supervised.features, original)
+
+
+@pytest.mark.parametrize("column", ["gross_forward_return", "net_forward_return", "target"])
+@pytest.mark.parametrize(
+    "dtype", ["float32", "int32", "object", "Float64", "Int64", "bool", "numeric_strings"]
+)
+def test_noncanonical_label_dtypes_are_rejected(column: str, dtype: str) -> None:
+    supervised = _supervised()
+    values = supervised.labels[column]
+    if dtype in ("int32", "Int64"):
+        values = values.round()
+    supervised.labels[column] = values.astype("str" if dtype == "numeric_strings" else dtype)
+    original = supervised.labels.copy(deep=True)
+    _rejected(supervised=supervised)
+    pd.testing.assert_frame_equal(supervised.labels, original)
+
+
+def test_float64_target_is_rejected_even_when_values_are_binary() -> None:
+    supervised = _supervised()
+    supervised.labels["target"] = supervised.labels["target"].astype("float64")
+    _rejected(supervised=supervised)
+
+
+def test_mismatched_one_session_spy_return_is_rejected() -> None:
+    supervised = _supervised()
+    supervised.features.at[1, "close_return_1d"] += 0.01
+    _rejected(supervised=supervised)
+
+
+def _rebuild_later_bundle(series_id: str, *, overlap: bool) -> QQQIWMFeatureBundle:
+    """Recompute every identity/proof/feature after changing a valid close value."""
+    bundle = _bundle(PREDICTIONS[1])
+    snapshots = [bundle.target, *bundle.sources]
+    position = ("SPY", *REQUIRED_SOURCE_IDS).index(series_id)
+    snapshot = snapshots[position]
+    closes = list(snapshot.closes)
+    closes[-2 if overlap else -1] += 0.25
+    snapshots[position] = replace(snapshot, closes=tuple(closes))
+    target, *sources = snapshots
+    return replace(
+        bundle,
+        target=target,
+        sources=tuple(sources),
+        proofs=tuple(_proof(item) for item in snapshots),
+        values=context_values(target, tuple(sources)),
+    )
+
+
+@pytest.mark.parametrize("series_id", ["SPY", *REQUIRED_SOURCE_IDS])
+def test_conflicting_overlapping_closes_fail_despite_valid_rebuilt_proofs(series_id: str) -> None:
+    first = _bundle(PREDICTIONS[0])
+    later = _rebuild_later_bundle(series_id, overlap=True)
+    # Each bundle is independently valid, including recalculated hashes and features.
+    later.__post_init__()
+    changed = (later.target, *later.sources)[("SPY", *REQUIRED_SOURCE_IDS).index(series_id)]
+    original = (first.target, *first.sources)[("SPY", *REQUIRED_SOURCE_IDS).index(series_id)]
+    assert changed.checksum != _snapshot(series_id, PREDICTIONS[1]).checksum
+    assert changed.sessions[-2] == original.sessions[-1]
+    assert changed.closes[-2] != original.closes[-1]
+    with pytest.raises(ValueError, match="conflicting_historical_close"):
+        QQQIWMFeatureHistory(CHECKSUM, SCHEMA_VERSION, (first, later))
+
+
+@pytest.mark.parametrize("series_id", ["SPY", *REQUIRED_SOURCE_IDS])
+def test_genuinely_new_close_observations_remain_valid(series_id: str) -> None:
+    later = _rebuild_later_bundle(series_id, overlap=False)
+    history = QQQIWMFeatureHistory(CHECKSUM, SCHEMA_VERSION, (_bundle(PREDICTIONS[0]), later))
+    supervised = _supervised()
+    if series_id == "SPY":
+        for n in (1, 5, 20):
+            supervised.features.at[1, f"close_return_{n}d"] = (
+                later.target.closes[-1] / later.target.closes[-n - 1] - 1
+            )
+    result = _align(supervised=supervised, history=history)
+    assert result.status == "eligible_for_synthetic_development"
+    assert result.prediction_sessions == PREDICTIONS
+
+
+@pytest.mark.parametrize("mode", ["duplicate", "reordered"])
+def test_history_anchors_must_be_unique_and_chronological(mode: str) -> None:
+    history = _history()
+    bundles = (history.bundles[0],) * 2 if mode == "duplicate" else tuple(reversed(history.bundles))
+    with pytest.raises(ValueError, match="unordered_or_duplicate_bundle_anchors"):
+        replace(history, bundles=bundles)
+
+
+@pytest.mark.parametrize("field", ["sessions", "closes"])
+def test_snapshot_sequences_must_be_immutable(field: str) -> None:
+    snapshot = _snapshot("SPY", PREDICTIONS[0])
+    changes: dict[str, Any] = {field: list(getattr(snapshot, field))}
+    with pytest.raises(ValueError, match="mutable_or_invalid_sequence"):
+        replace(snapshot, **changes)
+
+
+@pytest.mark.parametrize("field", ["sources", "proofs", "feature_ids", "values"])
+def test_bundle_sequences_must_be_immutable(field: str) -> None:
+    bundle = _bundle(PREDICTIONS[0])
+    changes: dict[str, Any] = {field: list(getattr(bundle, field))}
+    with pytest.raises(ValueError, match="mutable_or_invalid_sequence"):
+        replace(bundle, **changes)
+
+
+def test_history_bundle_sequence_must_be_immutable() -> None:
+    history = _history()
+    with pytest.raises(ValueError, match="mutable_or_invalid_sequence"):
+        replace(history, bundles=cast(Any, list(history.bundles)))
