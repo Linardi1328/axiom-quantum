@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from spy_market_agent.benchmark.artifacts import sha256_bytes, sha256_json
-
 from spy_market_agent.research import phase3c, phase3c_fixture, phase3c_reporting
 from spy_market_agent.research.phase3c_fixture import _generate_fixture
 from spy_market_agent.research.phase3c_reporting import (
