@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from spy_market_agent.benchmark.artifacts import sha256_bytes, sha256_json
+
 from spy_market_agent.research import phase3c, phase3c_fixture, phase3c_reporting
 from spy_market_agent.research.phase3c_fixture import _generate_fixture
 from spy_market_agent.research.phase3c_reporting import (
@@ -135,6 +137,7 @@ def test_runner_completes_with_external_capabilities_disabled() -> None:
 import json
 import os
 import sys
+from typing import NoReturn
 from unittest.mock import patch
 import spy_market_agent.research
 prefixes = ('alpaca', 'spy_market_agent.execution', 'spy_market_agent.paper_ops',
@@ -145,12 +148,12 @@ from spy_market_agent.research.phase3c import run_synthetic_experiment
 assert {name for name in sys.modules if name.startswith(prefixes)} == before
 original_getenv = os.getenv
 
-def forbidden(*args, **kwargs):
+def forbidden(*args: object, **kwargs: object) -> NoReturn:
     raise AssertionError('external capability called by synthetic runner')
 
-def guarded_getenv(key, *args):
+def guarded_getenv(key: str, default: str | None = None) -> str | None:
     assert not key.startswith(('ALPACA', 'APCA_', 'AWS_', 'ENABLE_PAPER', 'EXECUTION_'))
-    return original_getenv(key, *args)
+    return original_getenv(key, default)
 
 with patch('socket.socket.connect', forbidden), \
      patch('pandas.read_csv', forbidden), \
@@ -186,7 +189,35 @@ def test_code_lineage_reads_only_known_source_files() -> None:
     lineage = phase3c._runtime_lineage()
     assert lineage["python"].startswith("3.12.")
     assert lineage["dependency_versions"]["spy-market-agent"]
+    assert "intelligence/context_features.py" in lineage["source_checksums"]
     for path, checksum in lineage["source_checksums"].items():
         assert not Path(path).is_absolute()
         assert path.endswith(".py")
         assert len(checksum) == 64
+
+
+def test_uncommitted_context_definition_changes_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    relative_path = "intelligence/context_features.py"
+    source_path = Path(phase3c.__file__).resolve().parents[1] / relative_path
+    original_read_bytes = Path.read_bytes
+    original = original_read_bytes(source_path)
+    modified = original.replace(b"lookback_sessions=5,", b"lookback_sessions=6,", 1)
+    assert modified != original
+    before = phase3c._runtime_lineage()
+    assert before["source_checksums"][relative_path] == sha256_bytes(original)
+
+    def read_bytes(path: Path) -> bytes:
+        if path == source_path:
+            return modified
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    after = phase3c._runtime_lineage()
+    assert after["git_commit"] == before["git_commit"]
+    assert after["source_checksums"] == {
+        **before["source_checksums"],
+        relative_path: sha256_bytes(modified),
+    }
+    assert sha256_json(after) != sha256_json(before)

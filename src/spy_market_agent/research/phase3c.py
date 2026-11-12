@@ -116,6 +116,7 @@ def _runtime_lineage() -> dict[str, Any]:
         "research/phase3c_reporting.py",
         "research/qqq_iwm_policy.py",
         "research/qqq_iwm_alignment.py",
+        "intelligence/context_features.py",
         "research/phase3b_folds.py",
         "research/features.py",
         "research/candidates.py",
