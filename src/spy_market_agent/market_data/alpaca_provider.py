@@ -16,12 +16,12 @@ from alpaca.data.timeframe import TimeFrame
 from requests import Response, Session
 
 from spy_market_agent.market_data.acquisition import (
-    AcquisitionRequest,
     Clock,
     MarketDataCredentials,
     PaginationMetadata,
     ProviderIdentity,
     RawAcquisitionSnapshot,
+    StockBarsRequestProtocol,
 )
 from spy_market_agent.market_data.errors import (
     PaginationFailure,
@@ -62,6 +62,7 @@ class AlpacaMarketDataProvider:
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         sleep: Sleep = time.sleep,
+        context_monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if max_retries < 0:
             raise ValueError("max_retries must be nonnegative.")
@@ -71,14 +72,21 @@ class AlpacaMarketDataProvider:
         self._max_retries = max_retries
         self._timeout_seconds = timeout_seconds
         self._sleep = sleep
+        self._context_monotonic = context_monotonic
 
     def fetch_raw_snapshot(
         self,
-        request: AcquisitionRequest,
+        request: StockBarsRequestProtocol,
         *,
         credentials: MarketDataCredentials,
         clock: Clock,
     ) -> RawAcquisitionSnapshot:
+        from spy_market_agent.market_data.context_contracts import ContextAcquisitionRequest
+
+        if isinstance(request, ContextAcquisitionRequest):
+            from spy_market_agent.market_data.context_transport import fetch_context_snapshot
+
+            return fetch_context_snapshot(self, request, credentials=credentials, clock=clock)
         client = self._client_factory(credentials, self._timeout_seconds)
         params = _build_stock_bars_params(request)
         pages: list[dict[str, Any]] = []
@@ -104,7 +112,9 @@ class AlpacaMarketDataProvider:
             if symbol_bars is None:
                 symbol_bars = []
             if not isinstance(symbol_bars, list):
-                raise ProviderMalformedResponse("Alpaca bars for SPY must be a list.")
+                raise ProviderMalformedResponse(
+                    "Alpaca bars for the requested symbol must be a list."
+                )
             next_page_token = page.get("next_page_token")
             if next_page_token is not None and not isinstance(next_page_token, str):
                 raise ProviderMalformedResponse("Alpaca next_page_token must be a string or null.")
@@ -208,7 +218,7 @@ def _install_timeout_session(
     client._session = cast(Session, _TimeoutSession(timeout_seconds))
 
 
-def _build_stock_bars_params(request: AcquisitionRequest) -> dict[str, Any]:
+def _build_stock_bars_params(request: StockBarsRequestProtocol) -> dict[str, Any]:
     stock_request = StockBarsRequest(
         symbol_or_symbols=request.symbol,
         start=datetime.combine(request.start_date, datetime_time.min, tzinfo=UTC),
@@ -227,7 +237,11 @@ def _build_stock_bars_params(request: AcquisitionRequest) -> dict[str, Any]:
     params["feed"] = request.feed
     params["sort"] = "asc"
     params["limit"] = DEFAULT_PAGE_LIMIT
-    if request.asof is None:
+    # Context acquisitions explicitly opt out of Alpaca's default ticker
+    # remapping. The frozen SPY request still preserves its existing behavior.
+    if request.sanitized_parameters().get("asof") == "-":
+        params["asof"] = "-"
+    elif request.asof is None:
         params.pop("asof", None)
     return params
 
