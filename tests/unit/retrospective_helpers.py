@@ -19,7 +19,6 @@ from spy_market_agent.market_data.context_contracts import (
 from spy_market_agent.market_data.manifest import canonical_json_bytes
 from spy_market_agent.research.retrospective_context import (
     RetrospectiveContextSeries,
-    _canonical_csv,
     bind_context_series,
     derive_context_dataset_id,
 )
@@ -34,6 +33,12 @@ LINEAGE = ContextLineage(
 )
 
 
+def _text(value: Decimal) -> str:
+    """Canonical decimal text, written independently of the production helpers."""
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
 def synthetic_context_bars(symbol: str, sessions: tuple[date, ...], seed: int) -> list[ContextBar]:
     rng = np.random.default_rng(seed)
     close = 50.0 * np.exp(np.cumsum(0.0002 + 0.011 * rng.standard_normal(len(sessions))))
@@ -44,14 +49,24 @@ def synthetic_context_bars(symbol: str, sessions: tuple[date, ...], seed: int) -
             ContextBar(
                 symbol=symbol,  # type: ignore[arg-type]
                 session=session,
-                open=str(c),
-                high=str(c + Decimal("0.5")),
-                low=str(c - Decimal("0.5")),
-                close=str(c),
+                open=_text(c),
+                high=_text(c + Decimal("0.5")),
+                low=_text(c - Decimal("0.5")),
+                close=_text(c),
                 volume=1_000_000,
             )
         )
     return bars
+
+
+def canonical_csv(bars: list[ContextBar] | tuple[ContextBar, ...]) -> bytes:
+    """Independent writer for the v2 canonical CSV layout (LF, no quoting, no extras)."""
+    lines = ["symbol,session,open,high,low,close,volume"]
+    lines += [
+        f"{b.symbol},{b.session.isoformat()},{b.open},{b.high},{b.low},{b.close},{b.volume}"
+        for b in bars
+    ]
+    return ("\n".join(lines) + "\n").encode()
 
 
 def sealed_manifest(
@@ -101,7 +116,7 @@ def sealed_manifest(
 def make_artifact(
     symbol: str, sessions: tuple[date, ...], seed: int, **overrides: Any
 ) -> tuple[ContextAcquisitionManifest, bytes]:
-    canonical = _canonical_csv(tuple(synthetic_context_bars(symbol, sessions, seed)))
+    canonical = canonical_csv(synthetic_context_bars(symbol, sessions, seed))
     manifest = sealed_manifest(
         symbol, canonical, sessions[0], sessions[-1], len(sessions), **overrides
     )

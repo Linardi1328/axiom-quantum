@@ -39,11 +39,17 @@ the unchanged Phase 3C-B comparison protocol on data retrieved retrospectively?
 ## Retrospective QQQ/IWM source eligibility (`aq-p3cr-retrospective-eligibility-v1`)
 
 - Two series only (QQQ, IWM), v2 context acquisition (`alpaca`, SIP, `1Day`, `all`).
-- A series exists only if built by `bind_context_series(manifest, canonical_bytes)`. The
-  closes are parsed from the bytes; caller arrays, verification booleans and rights
-  claims are not accepted. The binder re-checks the manifest self-checksum, canonical
-  byte checksum, strict canonical re-serialization, OHLC sanity, XNYS session
-  continuity, manifest/session agreement and the lineage-bound dataset ID.
+- A series is only a verified `(manifest, canonical bytes)` pair built by
+  `bind_context_series`. It stores no derived values: sessions, closes and identities are
+  re-derived from the pair on every access and again at the computation boundary, so
+  `dataclasses.replace` or attribute tampering cannot substitute values under an unchanged
+  artifact identity. Caller arrays, verification booleans and rights claims are not
+  accepted. Validation mirrors the v2 acquisition verifier (reusing its pure helpers):
+  manifest self-checksum, canonical byte checksum, canonical decimal text and numeric
+  bounds, int64 volume bounds, byte and row bounds, strict canonical re-serialization,
+  OHLC sanity, exact requested XNYS session coverage, final-session completeness at
+  retrieval, the 120-second retrieval bound and the lineage-bound dataset ID. The
+  experiment identity also binds a checksum of the effective sessions and closes.
 - Context sessions must equal the eligible SPY source sessions **exactly**. Extra
   (protected) observations are rejected, so protected context is never processed.
 - `data_class = retrospective_corrected`; the manifest's `point_in_time_status` and
@@ -55,6 +61,20 @@ the unchanged Phase 3C-B comparison protocol on data retrieved retrospectively?
 - The binder checks internal consistency only. It does **not** replace
   `verify_context_artifacts` (exact code/runtime lineage), which the future local adapter
   must run first; that requirement is not weakened.
+
+## Parent integrity and evidence classes
+
+- Before isolation, the evaluator recomputes the full parent market-data checksum from the
+  actual rows (eligible and protected) and requires equality with the batch metadata and
+  the accepted boundary, then checks the exact source (2018-01-02 – 2024-10-15) and
+  prediction (2018-03-29 – 2024-10-07) dates in addition to the frozen row counts.
+  Protected rows are never used for features or labels.
+- The only test seam replaces the parent identity strings (`_FixtureIdentity`). It cannot
+  alter costs, seed, offsets, thresholds or fold policy: all configuration comes from one
+  immutable frozen mapping that is both executed and recorded. Fixture runs use evidence
+  class `synthetic_fixture` and experiment namespace `aq-p3cr-synth-`; observed
+  retrospective runs use `retrospective_corrected` and `aq-p3cr-retro-`. Neither class can
+  satisfy strict PIT eligibility (3C-A and the MI-2B binary preflight are unchanged).
 
 ## Features, models, folds, costs
 
@@ -107,8 +127,10 @@ attributed purely to incremental information.**
 `aq-p3cr-retro-<sha256>` binds the study/criteria/configuration IDs, parent identity and
 boundary, both context dataset IDs and canonical/manifest checksums, the owner rights
 reference, schemas, exact model definitions and columns, exact fold membership, Git SHA,
-Python/dependency versions and checksums of all transitive sources (including
-`context_features.py`, reporting, isolation and criteria logic). No wall-clock time,
+Python/dependency versions, the configuration file checksum and checksums of every
+in-package source file reachable from the study by static import analysis (calendar,
+benchmark splits/locks, feature models, research constants, reporting, isolation and
+criteria logic), together with the versions of the third-party packages they import. No wall-clock time,
 absolute path, credential or host identity is included. Bitwise reproduction is tested.
 
 ## Implementation boundary

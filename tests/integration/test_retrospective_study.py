@@ -4,19 +4,35 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import inspect
 import json
 import subprocess
 import sys
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 
+from spy_market_agent.datasets.models import LABEL_SCHEMA_VERSION
+from spy_market_agent.intelligence.context import MI2A_REQUIRED_CONTEXT_IDS
+from spy_market_agent.intelligence.context_features import (
+    MI2B_CONTEXT_FEATURE_POLICY_ID,
+    MI2B_SPY_CONTEXT_FEATURE_DEFINITIONS,
+    ContextFeatureValue,
+    SPYContextFeatureBundle,
+)
+from spy_market_agent.intelligence.legacy_spy import LEGACY_SPY_SERIES_ID
+from spy_market_agent.market_data.checksum import compute_market_data_checksum
 from spy_market_agent.market_data.manifest import DatasetManifest
 from spy_market_agent.market_data.models import MarketDataBatch
 from spy_market_agent.research import retrospective_study as study
+from spy_market_agent.research.binary_context_preflight import (
+    BinaryContextStatus,
+    ContextSourceProof,
+    assess_binary_context_preflight,
+)
 from spy_market_agent.research.campaign import ResearchCampaignConfig
 from spy_market_agent.research.phase2_isolation import apply_phase2_final_test_session_isolation
 from spy_market_agent.research.phase3c_reporting import CANDIDATE, MODEL_NAMES
@@ -50,7 +66,7 @@ class World:
     qqq: RetrospectiveContextSeries
     iwm: RetrospectiveContextSeries
     rights: study.OwnerRightsEvidence
-    protocol: study._Protocol
+    fixture: study._FixtureIdentity
 
 
 def _rights(*series: RetrospectiveContextSeries) -> study.OwnerRightsEvidence:
@@ -78,8 +94,9 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         bind_context_series(*make_artifact(sym, sessions, CONTEXT_SEED + i))
         for i, sym in enumerate(("QQQ", "IWM"))
     )
-    # Synthetic manifests cannot reproduce the real parent's identity; test seam only.
-    protocol = study._Protocol(
+    # Synthetic manifests cannot reproduce the real parent's identity; the seam replaces
+    # identity strings only and switches the whole run to the synthetic evidence class.
+    fixture = study._FixtureIdentity(
         parent_dataset_id=manifest.dataset_id,
         parent_canonical_checksum=manifest.canonical_content_checksum,
     )
@@ -91,7 +108,7 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         qqq,
         iwm,
         _rights(qqq, iwm),
-        protocol,
+        fixture,
     )
 
 
@@ -103,7 +120,7 @@ def _run(w: World, **overrides: Any) -> study.RetrospectiveStudyResult:
         "qqq": w.qqq,
         "iwm": w.iwm,
         "rights": w.rights,
-        "protocol": w.protocol,
+        "fixture_identity": w.fixture,
     }
     args.update(overrides)
     return study._evaluate_retrospective_study(**args)
@@ -155,11 +172,15 @@ def test_frozen_population_folds_and_labels(
 def test_result_is_labelled_retrospective_and_non_authoritative(
     reference: study.RetrospectiveStudyResult,
 ) -> None:
-    assert reference.evidence_kind == "retrospective_corrected"
+    assert reference.evidence_kind == "synthetic_fixture"
+    assert reference.experiment_id.startswith("aq-p3cr-synth-")
+    assert not reference.experiment_id.startswith("aq-p3cr-retro-")
     assert reference.point_in_time_status == reference.usage_rights_status == "UNVERIFIED"
     assert reference.execution_authority == "none"
     assert reference.disposition == "NO CANDIDATE PROMOTION"
     payload = json.loads(reference.payload_json)
+    assert payload["evidence_kind"] == payload["lineage"]["evidence_kind"] == "synthetic_fixture"
+    assert "Not observed retrospective research" in payload["synthetic_notice"]
     assert payload["execution_authority"] == "none"
     assert payload["disposition"] == "NO CANDIDATE PROMOTION"
     assert payload["screen"]["exploratory_screen"] in ("CRITERIA_MET", "CRITERIA_NOT_MET")
@@ -209,7 +230,7 @@ def test_experiment_is_reproducible_and_bound_to_inputs(
 def test_context_features_match_3ca_math_and_use_only_past_closes(world: World) -> None:
     spy = world.parent.data["close"].to_numpy(dtype="float64")[:1708]
     positions = np.asarray([60, 61, 700, 1700])
-    series = {"qqq-daily": world.qqq, "iwm-daily": world.iwm}
+    series = {"qqq-daily": world.qqq.derived(), "iwm-daily": world.iwm.derived()}
     frame = study._context_features(spy, series, positions)
     sessions = world.sessions
     for row, p in enumerate(positions):
@@ -223,11 +244,10 @@ def test_context_features_match_3ca_math_and_use_only_past_closes(world: World) 
         )
         assert tuple(frame.iloc[row]) == context_values(snaps[0], snaps[1:])
     # Mutating every close after each prediction day cannot change its features.
-    future = dataclasses.replace(
-        world.qqq, closes=world.qqq.closes[:701] + (1e9,) * (1708 - 701), _origin=world.qqq._origin
-    )
+    base = world.qqq.derived()
+    future = base._replace(closes=base.closes[:701] + (1e9,) * (1708 - 701))
     later = study._context_features(
-        spy, {"qqq-daily": future, "iwm-daily": world.iwm}, positions[:3]
+        spy, {"qqq-daily": future, "iwm-daily": world.iwm.derived()}, positions[:3]
     )
     assert later.equals(frame.iloc[:3])
 
@@ -249,7 +269,7 @@ def test_context_must_cover_exactly_the_eligible_sessions(world: World, case: st
 
 def test_parent_and_boundary_lineage_fail_closed(world: World) -> None:
     with pytest.raises(study.RetrospectiveStudyError, match="parent_lineage_mismatch"):
-        _run(world, protocol=study._Protocol())  # frozen real IDs differ from the fixture
+        _run(world, fixture_identity=None)  # the real accepted IDs differ from the fixture
     with pytest.raises(study.RetrospectiveStudyError, match="accepted_boundary_mismatch"):
         _run(world, accepted_boundary={**world.boundary, "research_slice_checksum": "0" * 64})
     stale = dict(world.boundary)
@@ -262,7 +282,8 @@ def test_frozen_constants_follow_the_owner_disposition() -> None:
     assert study.PARENT_DATASET_ID == "spy-v2p1-900ca75371bf05e25b1935b5"
     assert study.PARENT_CANONICAL_CHECKSUM.startswith("3fbaed8976d4aa1b")
     assert study.PARENT_CAMPAIGN_ID == "spy-v2p3-dev-1f9a68f3dce8df02e3645468"
-    assert "825930b0" not in json.dumps(dataclasses.asdict(study._Protocol()))
+    assert "825930b0" not in json.dumps(dict(study._FROZEN_CONFIGURATION))
+    assert "825930b0" not in study.PARENT_DATASET_ID
     phase3b = json.loads((ROOT / "configs/research/phase3b_nonoverlapping.json").read_text())
     assert phase3b["parent_dataset_id"] == study.PARENT_DATASET_ID
     assert phase3b["parent_canonical_checksum"] == study.PARENT_CANONICAL_CHECKSUM
@@ -328,12 +349,13 @@ def test_computation_has_no_network_credential_or_io_side_effects(
 
 def test_new_modules_have_no_credential_provider_broker_or_io_dependencies() -> None:
     forbidden = (
-        "spy_market_agent.market_data.alpaca",
-        "spy_market_agent.market_data.acquisition",
-        "spy_market_agent.market_data.context_acquisition",
+        # context_acquisition/context_transport are imported only for their pure, existing
+        # canonical-format helpers (no client is constructed, no network call is possible
+        # from this code); the provider, storage-writing and pipeline modules stay forbidden.
+        "spy_market_agent.market_data.alpaca_provider",
         "spy_market_agent.market_data.context_storage",
-        "spy_market_agent.market_data.context_transport",
         "spy_market_agent.market_data.pipeline",
+        "spy_market_agent.research.binary_context_preflight",
         "spy_market_agent.execution",
         "spy_market_agent.broker",
         "alpaca",
@@ -353,6 +375,7 @@ def test_new_modules_have_no_credential_provider_broker_or_io_dependencies() -> 
         } | {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         assert not [m for m in imported for f in forbidden if m == f or m.startswith(f + ".")]
         text = path.read_text()
+        assert "ContextSourceProof" not in text  # cannot manufacture strict-PIT proofs
         assert "getenv" not in text
         assert "environ" not in text
         assert "read_csv" not in text
@@ -360,7 +383,8 @@ def test_new_modules_have_no_credential_provider_broker_or_io_dependencies() -> 
 
 def test_fresh_process_import_touches_no_secrets_or_network() -> None:
     code = (
-        "import socket, ssl, asyncio, sklearn, pandas\n"
+        "import socket, ssl, asyncio, sklearn, pandas, requests, urllib3\n"
+        "import alpaca.common.exceptions\n"
         "def f(*a,**k): raise AssertionError('forbidden')\n"
         "socket.socket=f; socket.create_connection=f\n"
         "import spy_market_agent.research.retrospective_study as s\n"
@@ -383,3 +407,312 @@ def test_weakened_or_unrelated_modules_are_unchanged() -> None:
     assert qqq_iwm_policy.POLICY_ID == "aq-p3ca-qqq-iwm-synthetic-eligibility-v1"
     assert phase3c.RUNNER_ID == "aq-p3cb-synthetic-comparison-v1"
     assert not hasattr(phase3c, "RetrospectiveStudyResult")
+
+
+# ---------------------------------------------------------------------------
+# PR #101 remediation: H1 content binding, H2 frozen configuration/evidence class,
+# H4 parent integrity, M1 lineage, M2 strict-PIT isolation.
+# ---------------------------------------------------------------------------
+
+
+def test_substituted_context_cannot_keep_the_original_identity(
+    world: World, reference: study.RetrospectiveStudyResult
+) -> None:
+    # dataclasses.replace cannot inject closes/sessions/flags/identity: they are not fields.
+    for forged in ("closes", "sessions", "dataset_id", "canonical_sha256", "_origin"):
+        bad: dict[str, Any] = {forged: object()}
+        with pytest.raises(TypeError):
+            dataclasses.replace(world.qqq, **bad)
+    # Tampering after construction is caught when the evaluator re-derives from the pair.
+    victim = bind_context_series(world.qqq.manifest, world.qqq.canonical_bytes)
+    _, other_bytes = make_artifact("QQQ", world.sessions, CONTEXT_SEED + 5)
+    object.__setattr__(victim, "canonical_bytes", other_bytes)
+    with pytest.raises(RetrospectiveInputError, match="canonical_checksum_mismatch"):
+        _run(world, qqq=victim)
+    # A genuinely different (resealed) artifact has a different identity and experiment ID.
+    other = bind_context_series(*make_artifact("QQQ", world.sessions, CONTEXT_SEED + 5))
+    assert other.dataset_id != world.qqq.dataset_id
+    changed = _run(world, qqq=other, rights=_rights(other, world.iwm))
+    assert changed.experiment_id != reference.experiment_id
+    payload = json.loads(changed.payload_json)
+    assert {c["effective_data_checksum"] for c in payload["lineage"]["context"]} != {
+        c["effective_data_checksum"]
+        for c in json.loads(reference.payload_json)["lineage"]["context"]
+    }
+
+
+def test_fixture_seam_changes_identity_strings_only(world: World) -> None:
+    assert {f.name for f in dataclasses.fields(study._FixtureIdentity)} == {
+        "parent_dataset_id",
+        "parent_canonical_checksum",
+        "parent_campaign_id",
+    }
+    parameters = inspect.signature(study._evaluate_retrospective_study).parameters
+    assert "protocol" not in parameters
+    assert not {"seed", "costs", "folds", "thresholds"} & set(parameters)
+    assert not hasattr(study, "_Protocol")
+    with pytest.raises(TypeError):
+        study._FROZEN_CONFIGURATION["random_seed"] = 7  # type: ignore[index]
+    with pytest.raises(study.RetrospectiveStudyError, match="fixture_identity_must_differ"):
+        study._FixtureIdentity(study.PARENT_DATASET_ID, "f" * 64)
+    with pytest.raises(study.RetrospectiveStudyError, match="fixture_identity_must_differ"):
+        study._FixtureIdentity("spy-v2p1-" + "0" * 24, study.PARENT_CANONICAL_CHECKSUM)
+    # Without the seam the accepted identity is mandatory, so fixtures cannot pose as real.
+    with pytest.raises(study.RetrospectiveStudyError, match="parent_lineage_mismatch"):
+        _run(world, fixture_identity=None)
+
+
+def test_recorded_configuration_is_exactly_what_was_executed(
+    world: World, monkeypatch: pytest.MonkeyPatch, reference: study.RetrospectiveStudyResult
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def spy(name: str, attribute: str) -> None:
+        real = getattr(study, attribute)
+
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            seen.setdefault(name, []).append(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(study, attribute, wrapper)
+
+    spy("folds", "construct_disjoint_folds")
+    spy("labels", "build_forward_label_set")
+    spy("isolation", "apply_phase2_final_test_session_isolation")
+    spy("features", "build_research_feature_matrix")
+    spy("registry", "development_model_registry")
+    result = _run(world)
+    assert result == reference  # spies are call-through
+    config = json.loads(result.payload_json)["lineage"]["configuration"]
+    assert config == json.loads(json.dumps(dict(study._FROZEN_CONFIGURATION)))
+    (folds,) = seen["folds"]
+    for key in ("initial_training_rows", "purge_rows", "assessment_rows", "minimum_partial_rows"):
+        assert folds[key] == config[key]
+    (labels,) = seen["labels"]
+    assert (
+        str(labels["cost_assumptions"].commission_bps_per_side) == config["commission_bps_per_side"]
+    )
+    assert str(labels["cost_assumptions"].slippage_bps_per_side) == config["slippage_bps_per_side"]
+    assert (
+        seen["isolation"][0]["global_feature_warmup_rows"] == config["global_feature_warmup_rows"]
+    )
+    assert seen["features"][0]["global_feature_warmup_rows"] == config["global_feature_warmup_rows"]
+    assert {k["random_seed"] for k in seen["registry"]} == {config["random_seed"]}
+    from spy_market_agent.datasets.models import ENTRY_OFFSET_SESSIONS, EXIT_OFFSET_SESSIONS
+    from spy_market_agent.research import phase3c_reporting
+
+    assert (config["entry_offset_sessions"], config["exit_offset_sessions"]) == (
+        ENTRY_OFFSET_SESSIONS,
+        EXIT_OFFSET_SESSIONS,
+    )
+    score_source = inspect.getsource(phase3c_reporting._score)
+    assert f"threshold={config['classification_threshold']}" in score_source
+    assert f"reliability_bin_count={config['reliability_bin_count']}" in score_source
+    phase3b = json.loads((ROOT / "configs/research/phase3b_nonoverlapping.json").read_text())
+    for key in ("initial_training_rows", "purge_rows", "assessment_rows", "minimum_partial_rows"):
+        assert phase3b[key] == config[key]
+    assert phase3b["random_seed"] == config["random_seed"]
+    assert phase3b["threshold"] == config["classification_threshold"]
+
+
+def _parent_with(world: World, data: Any, **metadata: Any) -> MarketDataBatch:
+    updated = world.parent.metadata.model_copy(update=metadata)
+    if metadata:
+        return MarketDataBatch(data=data, metadata=updated)
+    # The batch validator would reject stale metadata, so emulate in-place DataFrame mutation
+    # of an already-validated batch (the model documents that the frame is not immutable).
+    return MarketDataBatch.model_construct(data=data, metadata=updated)
+
+
+@pytest.mark.parametrize("row", [100, 1700, 1900])
+def test_mutated_parent_rows_with_stale_metadata_are_rejected(world: World, row: int) -> None:
+    # Row 100 and 1700 are eligible development rows; 1900 is a protected (excluded) row.
+    assert row < len(world.parent.data)
+    assert (row < 1708) == (row in (100, 1700))
+    data = world.parent.data.copy(deep=True)
+    data.loc[row, "volume"] = int(data.loc[row, "volume"]) + 1
+    tampered = _parent_with(world, data)  # metadata checksum is now stale
+    with pytest.raises(study.RetrospectiveStudyError, match="parent_market_data_checksum_mismatch"):
+        _run(world, parent_market_data=tampered)
+
+
+@pytest.mark.parametrize("row", [100, 1900])
+def test_mutated_parent_with_refreshed_metadata_still_disagrees_with_accepted_boundary(
+    world: World, row: int
+) -> None:
+    data = world.parent.data.copy(deep=True)
+    data.loc[row, "volume"] = int(data.loc[row, "volume"]) + 1
+    refreshed = _parent_with(world, data, dataset_checksum=compute_market_data_checksum(data))
+    with pytest.raises(study.RetrospectiveStudyError, match="parent_market_data_checksum_mismatch"):
+        _run(world, parent_market_data=refreshed)
+    stale_boundary = {**world.boundary, "parent_canonical_market_data_checksum": "0" * 64}
+    with pytest.raises(study.RetrospectiveStudyError, match="parent_market_data_checksum_mismatch"):
+        _run(world, accepted_boundary=stale_boundary)
+
+
+def test_exact_source_and_prediction_dates_are_enforced(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert (
+        date(2018, 1, 2),
+        date(2024, 10, 15),
+    ) == (study.EXPECTED_SOURCE_FIRST, study.EXPECTED_SOURCE_LAST)
+    assert (
+        date(2018, 3, 29),
+        date(2024, 10, 7),
+    ) == (study.EXPECTED_PREDICTION_FIRST, study.EXPECTED_PREDICTION_LAST)
+    for name, shifted in (
+        ("EXPECTED_SOURCE_FIRST", date(2018, 1, 3)),
+        ("EXPECTED_SOURCE_LAST", date(2024, 10, 14)),
+        ("EXPECTED_PREDICTION_FIRST", date(2018, 3, 28)),
+        ("EXPECTED_PREDICTION_LAST", date(2024, 10, 8)),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(study, name, shifted)
+            with pytest.raises(study.RetrospectiveStudyError, match="frozen_population_mismatch"):
+                _run(world)
+
+
+def test_lineage_covers_the_transitive_code_and_configuration(
+    world: World, reference: study.RetrospectiveStudyResult, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = json.loads(reference.payload_json)["lineage"]["runtime"]
+    checksums = runtime["source_checksums"]
+    for needed in (
+        "market_data/calendar.py",  # NYSE calendar
+        "benchmark/splits.py",  # Phase 2 split definitions
+        "intelligence/context_features.py",  # feature models
+        "research/retrospective_study.py",
+        "research/retrospective_context.py",
+        "research/phase2_isolation.py",
+        "research/phase3c_reporting.py",
+        "research/qqq_iwm_policy.py",
+    ):
+        assert needed in checksums
+    assert any(name.startswith("benchmark/") and "lock" in name for name in checksums)
+    for name, digest in checksums.items():
+        path = ROOT / "src/spy_market_agent" / name
+        assert study.sha256_bytes(path.read_bytes()) == digest
+    versions = runtime["dependency_versions"]
+    for dependency in ("numpy", "pandas", "scikit-learn", "exchange_calendars", "pydantic"):
+        assert dependency in versions
+    config_file = "configs/research/phase3b_nonoverlapping.json"
+    assert runtime["configuration_file_checksums"][config_file] == study.sha256_bytes(
+        (ROOT / config_file).read_bytes()
+    )
+    # Changing any covered file's checksum, or a dependency version, changes the identity.
+    original_checksums, original_versions = study._transitive_lineage()
+    for patched in (
+        ({**original_checksums, "market_data/calendar.py": "0" * 64}, original_versions),
+        (original_checksums, {**original_versions, "numpy": "0.0.0"}),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(study, "_transitive_lineage", lambda patched=patched: patched)
+            assert _run(world).experiment_id != reference.experiment_id
+
+
+def test_lineage_includes_every_module_loaded_by_importing_the_study() -> None:
+    code = (
+        "import sys, json\n"
+        "import spy_market_agent.research.retrospective_study as s\n"
+        "mods = sorted(m for m in sys.modules if m.startswith('spy_market_agent.'))\n"
+        "checks, _ = s._transitive_lineage()\n"
+        "print(json.dumps({'mods': mods, 'files': sorted(checks)}))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={"PYTHONPATH": str(ROOT / "src"), "PATH": ""},
+    )
+    assert done.returncode == 0, done.stderr
+    loaded = json.loads(done.stdout)
+    covered = set(loaded["files"])
+    missing = []
+    for module in loaded["mods"]:
+        relative = module.removeprefix("spy_market_agent.").replace(".", "/")
+        if not {relative + ".py", relative + "/__init__.py"} & covered:
+            missing.append(module)
+    assert not missing
+
+
+def _bundle_for(session: date, cutoff: datetime, snapshots: tuple[str, ...]) -> Any:
+    as_of = cutoff - timedelta(minutes=1)
+    by_id = dict(zip(MI2A_REQUIRED_CONTEXT_IDS, snapshots, strict=True))
+    features = tuple(
+        ContextFeatureValue(
+            policy_id=MI2B_CONTEXT_FEATURE_POLICY_ID,
+            feature_id=definition.feature_id,
+            methodology_id=definition.methodology_id,
+            source_series_id=definition.source_series_id,
+            source_snapshot_id=by_id[definition.source_series_id],
+            target_snapshot_id="synthetic-spy",
+            anchor_session=session,
+            as_of=as_of,
+            lookback_sessions=definition.lookback_sessions,
+            unit=definition.unit,
+            value=0.1,
+        )
+        for definition in MI2B_SPY_CONTEXT_FEATURE_DEFINITIONS
+    )
+    return SPYContextFeatureBundle(
+        policy_id=MI2B_CONTEXT_FEATURE_POLICY_ID,
+        as_of=as_of,
+        anchor_session=session,
+        target_series_id=LEGACY_SPY_SERIES_ID,
+        target_snapshot_id="synthetic-spy",
+        context_snapshot_ids=snapshots,
+        features=features,
+    )
+
+
+def test_retrospective_and_synthetic_evidence_never_pass_the_real_mi2b_preflight(
+    world: World,
+) -> None:
+    """Run the actual MI-2B binary preflight with the only truthful proofs we can derive."""
+    session = world.sessions[900]
+    cutoff = datetime(session.year, session.month, session.day, 22, 0, tzinfo=UTC)
+    snapshots = tuple(f"snapshot-{i}" for i in range(len(MI2A_REQUIRED_CONTEXT_IDS)))
+    bundle = _bundle_for(session, cutoff, snapshots)
+    series = {"qqq-daily": world.qqq, "iwm-daily": world.iwm}
+    assert set(series) <= set(MI2A_REQUIRED_CONTEXT_IDS)
+    proofs = []
+    for series_id, snapshot in zip(MI2A_REQUIRED_CONTEXT_IDS, snapshots, strict=True):
+        item = series.get(series_id)
+        if item is None:  # unrelated context sources: fully verified, so they add no reasons
+            proofs.append(
+                ContextSourceProof(
+                    series_id, snapshot, "a" * 64, cutoff - timedelta(minutes=2), True, True
+                )
+            )
+            continue
+        manifest = item.manifest
+        proofs.append(
+            ContextSourceProof(
+                series_id=series_id,
+                snapshot_id=snapshot,
+                checksum_sha256=manifest.canonical_sha256,
+                # The only availability time the artifact itself can attest is retrieval.
+                available_as_of=manifest.retrieval_completed_at,
+                quality_verified=str(manifest.point_in_time_status) == "VERIFIED",
+                usage_rights_verified=str(manifest.usage_rights_status) == "VERIFIED",
+            )
+        )
+    result = assess_binary_context_preflight(
+        bundle=bundle,
+        label_schema=LABEL_SCHEMA_VERSION,
+        prediction_session=session,
+        signal_cutoff=cutoff,
+        source_proofs=tuple(proofs),
+    )
+    assert result.status == BinaryContextStatus.INELIGIBLE
+    assert {
+        "unverified_context_quality",
+        "unverified_context_usage_rights",
+        "source_available_after_signal_cutoff",
+    } <= set(result.reasons)
+    assert result.values == ()
+    assert result.execution_authority == "none"
+    # The study's own output class is never an input to that gate and carries no authority.
+    assert json.loads(_run(world).payload_json)["execution_authority"] == "none"
