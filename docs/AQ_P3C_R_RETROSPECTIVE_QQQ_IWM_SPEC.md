@@ -51,7 +51,11 @@ the unchanged Phase 3C-B comparison protocol on data retrieved retrospectively?
   retrieval, the 120-second retrieval bound and the lineage-bound dataset ID. The
   experiment identity also binds a checksum of the effective sessions and closes.
 - Context sessions must equal the eligible SPY source sessions **exactly**. Extra
-  (protected) observations are rejected, so protected context is never processed.
+  (protected) context rows may be parsed during artifact integrity validation, but they
+  are rejected before any feature generation, label construction or fitting, so protected
+  context never reaches modelling. The future adapter must validate the approved date
+  scope from metadata (manifest start/end dates and row count) **before** reading context
+  artifacts at all.
 - `data_class = retrospective_corrected`; the manifest's `point_in_time_status` and
   `usage_rights_status` stay `UNVERIFIED` and are copied unchanged into lineage.
 - Owner entitlement evidence is a separate `OwnerRightsEvidence` reference bound to both
@@ -141,6 +145,12 @@ in-memory canonical JSON. Tests use independently generated synthetic fixtures o
 never real market data, credentials or the network.
 
 ## Unresolved real-data prerequisites (separate owner authorization)
+
+Execution environment (applies to every item below): the future real-data adapter must run
+in a fresh isolated process, from a clean pinned checkout, in a verified environment, and
+read only privately owned input snapshots. The lineage hashes the code actually imported,
+so a dirty or unpinned checkout is not acceptable evidence. Internal checksum consistency
+checked by the binder is not source authentication.
 
 1. A reviewed local adapter that runs `verify_context_artifacts` (exact code/runtime
    lineage), verifies the Phase 3B campaign and obtains the accepted boundary.

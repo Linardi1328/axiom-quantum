@@ -120,17 +120,31 @@ def test_modified_bytes_fail_checksum_or_identity() -> None:
     tampered = canonical[:-3] + b"999"
     with pytest.raises(RetrospectiveInputError, match="canonical_checksum_mismatch"):
         bind_context_series(manifest, tampered)
-    # Attacker reseals the checksum and manifest but cannot recompute the lineage-bound ID.
+
+
+def test_resealed_manifest_with_stale_dataset_id_is_rejected() -> None:
+    manifest, canonical = make_artifact("QQQ", SESSIONS, 7)
+    lines = canonical.decode().split("\n")
+    parts = lines[5].split(",")
+    parts[6] = "1000001"  # a valid volume; layout and final newline are preserved
+    lines[5] = ",".join(parts)
+    body = "\n".join(lines).encode()
+    assert body.endswith(b"\n")
+    assert body != canonical
     resealed = sealed_manifest(
         "QQQ",
-        tampered,
+        body,
         SESSIONS[0],
         SESSIONS[-1],
         len(SESSIONS),
-        dataset_id=manifest.dataset_id,
+        dataset_id=manifest.dataset_id,  # retained from the original artifact
     )
-    with pytest.raises(RetrospectiveInputError):
-        bind_context_series(resealed, tampered)
+    assert resealed.canonical_sha256 == sha256_bytes(body)
+    with pytest.raises(RetrospectiveInputError, match="dataset_identity_mismatch"):
+        bind_context_series(resealed, body)
+    # Internal consistency is not authentication: a fully recomputed identity binds.
+    # Only the future adapter's verification of the real artifacts can establish provenance.
+    assert bind_context_series(*make_artifact("QQQ", SESSIONS, 7)).dataset_id == manifest.dataset_id
 
 
 def test_manifest_forgery_is_rejected() -> None:
