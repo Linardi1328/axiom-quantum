@@ -144,6 +144,60 @@ real-input runner, loader, CLI, writer, scheduler or persisted artifact; output 
 in-memory canonical JSON. Tests use independently generated synthetic fixtures only and
 never real market data, credentials or the network.
 
+## Verified-data adapter (`aq-p3cr-verified-data-adapter-v1`)
+
+An offline adapter, `research/retrospective_adapter.py`, joins verified local inputs to the
+evaluator. It acquires nothing and reads no credentials. It has two entry points, each
+usable **once per process**: `eligibility_preflight` (never fits) and
+`run_authorized_experiment` (evaluates once, only under an owner authorization).
+
+- **Frozen parent evidence:** dataset `spy-v2p1-900ca75371bf05e25b1935b5`; canonical
+  content checksum `3fbaed89…99df6c`; market-data checksum `09371762…bad6c2`; manifest
+  self-checksum `de296295…fee6b6`; campaign `spy-v2p3-dev-1f9a68f3dce8df02e3645468`. The
+  manifest self-checksum is `manifest.manifest_artifact_checksum` (not the hash of the
+  complete file). Existing verification is reused unchanged: `_verify_parent_campaign`,
+  `_load_verified_research_market_data`, `apply_phase2_final_test_session_isolation`
+  (mechanical boundary must equal the accepted campaign metadata exactly),
+  `verify_context_artifacts`, `ContextStore`, `bind_context_series` and the evaluator.
+- **Metadata gate first:** both QQQ/IWM manifests are read and checked (v2 schema only,
+  QQQ and IWM exactly, Alpaca SIP 1Day all-adjusted, 2018-01-02 to 2024-10-15, 1,708 XNYS
+  sessions, UNVERIFIED flags, canonical serialization, self-checksum and path identity)
+  **before** any raw or canonical observation is read. Different scope, v1 artifacts,
+  duplicates and protected-context scope are refused at this gate.
+- **No substitution:** the exact gated manifest, the re-read manifest bytes and the
+  canonical bytes consumed by the binder must equal what `verify_context_artifacts`
+  verified, and inputs are re-fingerprinted after evaluation. All input files must be
+  non-symlinks owned by the current user and not group/other writable.
+- **Runtime prerequisites (mechanical):** `python -I` (isolated), a clean Git checkout
+  (no modified or untracked files) at the owner-pinned 40-hex commit, an uncached
+  recomputation of the source/dependency closure equal to the one cached at import, and
+  unchanged checkout, closure and inputs after evaluation. The acquisition verifier
+  additionally requires the artifacts' recorded code/runtime lineage to equal the current
+  one, so QQQ/IWM capture must be performed at the same pinned commit.
+- **Authorization:** `run_authorized_experiment` needs a private (mode 0600),
+  git-ignored, untracked, owner-authored JSON file that binds the exact preflight report
+  digest (parent, campaign, boundary and both context datasets), the pinned commit, the
+  evidence class and the output destination, plus a rights reference. A Boolean cannot
+  authorize a run. The rights reference is recorded as an owner attestation
+  (`owner_attested_reference_not_verified_by_system`); this code cannot verify a licence,
+  and the file is an input-bound control, not a cryptographic signature.
+- **Output:** `artifacts/research/phase3cr/<experiment-id>/` for observed retrospective
+  runs and `artifacts/research/phase3cr_synthetic/<experiment-id>/` for fixtures. The
+  destination must be git-ignored and untracked, must not exist, is created with owner-only
+  permissions, never overwritten, and gets an integrity index written last. Persisted
+  content is sanitized aggregate/fold metrics, configuration, lineage (fold membership and
+  protected session lists replaced by checksums and counts), findings, limitations and the
+  authorization record. No prices, feature values, row probabilities, fitted estimators or
+  credentials are written. The real destination remains subject to owner approval before
+  any real execution.
+- **Evidence separation:** the only test seam supplies fixture parent identities and
+  switches evidence class to `synthetic_fixture`, namespace `aq-p3cr-synth-` and the
+  synthetic output root.
+
+Remaining prerequisites before any real run (each needs separate owner authorization):
+bounded QQQ/IWM capture at the pinned commit with rights confirmation; approval of the
+real output destination; and an owner-authored authorization bound to the preflight digest.
+
 ## Unresolved real-data prerequisites (separate owner authorization)
 
 Execution environment (applies to every item below): the future real-data adapter must run
