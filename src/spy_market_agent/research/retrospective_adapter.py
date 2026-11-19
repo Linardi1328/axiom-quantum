@@ -5,22 +5,28 @@ Two entry points, each usable at most once per process:
 * :func:`eligibility_preflight` verifies metadata and artifacts and returns a sanitized
   report. It never fits a model.
 * :func:`run_authorized_experiment` additionally requires an owner-authored authorization
-  file bound to the exact report digest, commit and destination, then evaluates once and
-  persists sanitized, immutable output.
+  file bound to the exact report digest, commit and destination, atomically consumes a
+  single-use execution marker, evaluates once and persists sanitized, immutable output.
 
 Nothing here acquires data, reads credentials, contacts a network or broker, or writes
 outside the approved ignored output root. Existing verification (``verify_context_artifacts``,
 ``_verify_parent_campaign``, ``_load_verified_research_market_data``, the Phase 2 isolation
-function, ``bind_context_series`` and the evaluator) is reused unchanged. The owner rights
-reference is recorded as an owner attestation; this code cannot verify a licence, and the
-manifest flags stay UNVERIFIED. Authorization is a private, owner-controlled, input-bound
-file; it is not a cryptographic signature.
+function, ``bind_context_series`` and the evaluator) is reused unchanged.
+
+Trust boundaries (honest limits): the owner rights reference is an owner attestation that
+this code cannot verify; the authorization and execution marker are private same-user files,
+not cryptographic authorization; the runtime fingerprint is a source/dependency-version
+comparison against a baseline taken when this module was imported, not cryptographic
+loaded-code attestation. None of this defends against an adversary operating under the same
+OS account, which could rewrite any of these files or the interpreter.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import platform
 import re
 import stat
 import subprocess
@@ -38,12 +44,12 @@ from spy_market_agent.market_data.checksum import compute_market_data_checksum
 from spy_market_agent.market_data.context_acquisition import verify_context_artifacts
 from spy_market_agent.market_data.context_contracts import (
     CONTEXT_ACQUISITION_SCHEMA,
+    DATASET_PATTERN,
     ContextAcquisitionManifest,
 )
 from spy_market_agent.market_data.context_storage import ContextStore
 from spy_market_agent.market_data.errors import MarketDataAcquisitionError
 from spy_market_agent.research import retrospective_study as study
-from spy_market_agent.research.artifacts import ResearchArtifactStore
 from spy_market_agent.research.campaign import ResearchCampaignConfig
 from spy_market_agent.research.phase2_isolation import apply_phase2_final_test_session_isolation
 from spy_market_agent.research.phase3b import (
@@ -59,6 +65,7 @@ from spy_market_agent.research.runner import _load_verified_research_market_data
 
 ADAPTER_ID: Final = "aq-p3cr-verified-data-adapter-v1"
 AUTHORIZATION_SCHEMA: Final = "aq-p3cr-experiment-authorization-v1"
+MARKER_SCHEMA: Final = "aq-p3cr-execution-marker-v1"
 APPROVED_START: Final = date(2018, 1, 2)
 APPROVED_END: Final = date(2024, 10, 15)
 APPROVED_SESSIONS: Final = 1708
@@ -66,11 +73,17 @@ OUTPUT_ROOTS: Final = {
     "retrospective_corrected": "artifacts/research/phase3cr",
     "synthetic_fixture": "artifacts/research/phase3cr_synthetic",
 }
+NAMESPACES: Final = {
+    "retrospective_corrected": study.RETROSPECTIVE_NAMESPACE,
+    "synthetic_fixture": study.SYNTHETIC_NAMESPACE,
+}
+EXECUTIONS_DIRECTORY: Final = "executions"
 DEFAULT_PHASE3B_CONFIG: Final = "configs/research/phase3b_nonoverlapping.json"
 MAX_AUTHORIZATION_BYTES: Final = 64 * 1024
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _AUTH_ID = re.compile(r"[A-Za-z0-9._:-]{8,128}\Z")
+_EXPERIMENT_ID = re.compile(r"aq-p3cr-(retro|synth)-[0-9a-f]{64}\Z")
 FORBIDDEN_OUTPUT_KEYS: Final = frozenset(
     {
         "probabilities",
@@ -92,7 +105,7 @@ FORBIDDEN_OUTPUT_KEYS: Final = frozenset(
         "token",
     }
 )
-_PROCESS: dict[str, bool] = {"used": False}
+_PROCESS: dict[str, bool] = {"preflight": False, "run": False}
 
 
 class AdapterError(ValueError):
@@ -112,6 +125,8 @@ class FrozenParent:
     market_data_checksum: str
     manifest_self_checksum: str
     campaign_id: str
+    campaign_index_sha256: str
+    campaign_manifest_sha256: str
 
 
 REAL_PARENT: Final = FrozenParent(
@@ -120,6 +135,10 @@ REAL_PARENT: Final = FrozenParent(
     market_data_checksum="09371762ecab4ee32dad6896b454d693d0e654f8f565ec021557a5df0bbad6c2",
     manifest_self_checksum="de296295cd4b491848d7c0abe0470c3c74e81123491b92efbd006fa458fee6b6",
     campaign_id=study.PARENT_CAMPAIGN_ID,
+    # Locally verified digests of the accepted campaign's artifact_index.json and
+    # experiment_manifest.json; a self-consistently resealed campaign cannot match them.
+    campaign_index_sha256="e1934f41878f26d680ec2ec3a76744b6d7c9431e4eda6d02ac54ec5781c5f60f",
+    campaign_manifest_sha256="bdab6f063aa0ab56f6c72b9d29c1257ed72398355de6029ad03b3bf40193977f",
 )
 
 
@@ -136,6 +155,8 @@ class PreflightReport:
 
     evidence_kind: str
     git_commit: str
+    python_version: str
+    runtime_fingerprint: str
     parent_dataset_id: str
     parent_canonical_checksum: str
     parent_market_data_checksum: str
@@ -144,6 +165,7 @@ class PreflightReport:
     campaign_index_sha256: str
     campaign_manifest_sha256: str
     research_slice_checksum: str
+    input_snapshot_sha256: str
     source_rows: int
     source_first_session: str
     source_last_session: str
@@ -158,7 +180,32 @@ class PreflightReport:
 
     @property
     def digest(self) -> str:
+        """Binds inputs, commit and runtime identity: the approval granularity."""
         return sha256_json(_plain(self))
+
+    @property
+    def input_digest(self) -> str:
+        """Inputs only (no commit/runtime): the single-use execution granularity."""
+        return sha256_json(
+            {
+                "study_id": study.STUDY_ID,
+                "evidence_kind": self.evidence_kind,
+                "parent": [
+                    self.parent_dataset_id,
+                    self.parent_canonical_checksum,
+                    self.parent_market_data_checksum,
+                    self.parent_manifest_self_checksum,
+                ],
+                "campaign": [
+                    self.campaign_id,
+                    self.campaign_index_sha256,
+                    self.campaign_manifest_sha256,
+                    self.research_slice_checksum,
+                ],
+                "context": [list(item) for item in self.context],
+                "input_snapshot_sha256": self.input_snapshot_sha256,
+            }
+        )
 
 
 def _plain(report: PreflightReport) -> dict[str, Any]:
@@ -203,12 +250,20 @@ class _Verified:
     qqq: RetrospectiveContextSeries
     iwm: RetrospectiveContextSeries
     frozen: FrozenParent
-    fingerprint: tuple[str, ...]
+    files: tuple[Path, ...]
+    snapshot: dict[str, str]
 
 
 # ---------------------------------------------------------------------------
-# Runtime prerequisites
+# Git (never inherits caller repository selection) and runtime prerequisites
 # ---------------------------------------------------------------------------
+
+
+def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(
+        ["git", *args], cwd=cwd, env=environment, capture_output=True, text=True, check=False
+    )
 
 
 def _code_repository() -> Path:
@@ -218,24 +273,16 @@ def _code_repository() -> Path:
 def _collect_runtime_attestation(code_repository: Path | None = None) -> RuntimeAttestation:
     repository = code_repository or _code_repository()
     try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repository,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all"],
-            cwd=repository,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
+        head = _git(["rev-parse", "HEAD"], repository)
+        status = _git(["status", "--porcelain", "--untracked-files=all"], repository)
+    except OSError:
         raise _reject("runtime_attestation_unavailable") from None
+    if head.returncode != 0 or status.returncode != 0:
+        raise _reject("runtime_attestation_unavailable")
     return RuntimeAttestation(
-        isolated=bool(sys.flags.isolated), git_commit=head, clean=not status.strip()
+        isolated=bool(sys.flags.isolated),
+        git_commit=head.stdout.strip(),
+        clean=not status.stdout.strip(),
     )
 
 
@@ -253,26 +300,36 @@ def _require_runtime(attestation: RuntimeAttestation, pinned_commit: str) -> Non
         raise _reject("checkout_not_at_pinned_commit")
 
 
-def _claim_process() -> None:
-    if _PROCESS["used"]:
+def _claim_process(entry: str) -> None:
+    if _PROCESS[entry]:
         raise _reject("process_not_fresh")
-    _PROCESS["used"] = True
+    _PROCESS[entry] = True
 
 
 def _runtime_fingerprint() -> str:
-    """Uncached code/dependency fingerprint for the study and this adapter."""
-    here = str(Path(__file__).resolve())
-    roots = (str(Path(study.__file__).resolve()), here)
+    """Fresh (uncached) fingerprint of study+adapter sources, dependency versions and Python."""
+    roots = (str(Path(study.__file__).resolve()), str(Path(__file__).resolve()))
     checksums, versions = study._closure(roots)
-    return sha256_json({"checksums": checksums, "versions": versions})
+    return sha256_json(
+        {
+            "python": platform.python_version(),
+            "implementation": platform.python_implementation(),
+            "checksums": checksums,
+            "versions": versions,
+        }
+    )
 
 
-def _require_lineage_not_stale() -> str:
-    cached = study._transitive_lineage()
-    fresh = study._closure((str(Path(study.__file__).resolve()),))
-    if cached != fresh:
+# Baseline captured when this module is imported (before any entry point can run).
+_IMPORT_BASELINE: str = _runtime_fingerprint()
+
+
+def _require_runtime_unchanged() -> str:
+    if _runtime_fingerprint() != _IMPORT_BASELINE or study._transitive_lineage() != study._closure(
+        (str(Path(study.__file__).resolve()),)
+    ):
         raise _reject("source_or_dependencies_changed_since_import")
-    return _runtime_fingerprint()
+    return _IMPORT_BASELINE
 
 
 # ---------------------------------------------------------------------------
@@ -297,26 +354,107 @@ def _require_private(path: Path, root: Path) -> None:
             raise _reject("input_not_privately_owned")
 
 
-def _require_ignored_untracked(root: Path, relative: Path) -> None:
-    ignored = subprocess.run(
-        ["git", "check-ignore", "--no-index", "-q", "--", relative.as_posix()],
-        cwd=root,
-        capture_output=True,
-        check=False,
+def _require_ignored_untracked(
+    root: Path, relatives: list[Path], *, tree: Path | None = None
+) -> None:
+    """Every path must be ignored and untracked; ``tree`` must have no tracked descendants."""
+    for relative in relatives:
+        ignored = _git(["check-ignore", "--no-index", "-q", "--", relative.as_posix()], root)
+        tracked = _git(["ls-files", "--error-unmatch", "--", relative.as_posix()], root)
+        if ignored.returncode != 0 or tracked.returncode == 0:
+            raise _reject("path_must_be_ignored_and_untracked")
+    if tree is not None:
+        listing = _git(["ls-files", "--", tree.as_posix()], root)
+        if listing.returncode != 0 or listing.stdout.strip():
+            raise _reject("path_must_be_ignored_and_untracked")
+
+
+def _check_directory(descriptor: int) -> None:
+    info = os.fstat(descriptor)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        raise _reject("output_ancestry_unsafe")
+
+
+def _open_directory_chain(root: Path, parts: tuple[str, ...], *, create: bool) -> int:
+    """Descriptor-relative, no-follow walk; missing components are created exclusively 0700."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(root, flags)
+    except OSError:
+        raise _reject("output_ancestry_unsafe") from None
+    try:
+        _check_directory(descriptor)
+        for part in parts:
+            if create:
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(part, 0o700, dir_fd=descriptor)
+            following = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = following
+            _check_directory(descriptor)
+        return descriptor
+    except OSError:
+        os.close(descriptor)
+        raise _reject("output_ancestry_unsafe") from None
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _check_existing_chain(root: Path, parts: tuple[str, ...]) -> None:
+    """Reject unsafe components that already exist; stop quietly at the first missing one."""
+    current = root
+    for part in parts:
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            return
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022
+        ):
+            raise _reject("output_ancestry_unsafe")
+
+
+def _write_exclusive(directory: int, name: str, data: bytes) -> None:
+    descriptor = os.open(
+        name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
     )
-    tracked = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", relative.as_posix()],
-        cwd=root,
-        capture_output=True,
-        check=False,
-    )
-    if ignored.returncode != 0 or tracked.returncode == 0:
-        raise _reject("path_must_be_ignored_and_untracked")
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(descriptor, view) :]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 # ---------------------------------------------------------------------------
 # Metadata gate (manifests only; no raw or canonical observations are read)
 # ---------------------------------------------------------------------------
+
+
+def _manifest_relative(root: Path, path: Path, symbol: str) -> Path:
+    """Exact v2 manifest path shape, validated BEFORE any file is opened."""
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            candidate = candidate.relative_to(root)
+        except ValueError:
+            raise _reject("context_manifest_path_invalid") from None
+    parts = candidate.parts
+    if (
+        len(parts) != 8
+        or ".." in parts
+        or parts[:7] != ("data", "manifests", "alpaca", symbol, "1Day", "sip", "all")
+        or not parts[7].endswith(".manifest.json")
+        or not DATASET_PATTERN.fullmatch(parts[7].removesuffix(".manifest.json"))
+    ):
+        raise _reject("context_manifest_path_invalid")
+    return candidate
 
 
 def _metadata_gate(
@@ -325,11 +463,18 @@ def _metadata_gate(
     expected_sessions = len(XNYSCalendar().sessions_between(APPROVED_START, APPROVED_END))
     if expected_sessions != APPROVED_SESSIONS:
         raise _reject("approved_scope_session_count_mismatch")
+    # Both paths are validated structurally before either is read.
+    relatives = {
+        symbol: _manifest_relative(store.root, path, symbol)
+        for symbol, path in (("QQQ", qqq_path), ("IWM", iwm_path))
+    }
+    if relatives["QQQ"] == relatives["IWM"]:
+        raise _reject("duplicate_context_dataset")
     found: dict[str, tuple[ContextAcquisitionManifest, bytes, Path]] = {}
-    for symbol, path in (("QQQ", qqq_path), ("IWM", iwm_path)):
+    for symbol, relative in relatives.items():
         try:
             with store.locked(create=False):
-                data = store.read(path)
+                data = store.read(relative)
             manifest = ContextAcquisitionManifest.model_validate_json(data)
         except (MarketDataAcquisitionError, ValidationError, OSError, ValueError):
             raise _reject("context_manifest_unreadable_or_not_v2") from None
@@ -357,11 +502,9 @@ def _metadata_gate(
             canonical_json_bytes(manifest.model_copy(update={"manifest_sha256": None}))
         ):
             raise _reject("context_manifest_checksum_mismatch")
-        expected = store.paths(symbol, manifest.dataset_id)[2]
-        relative = path.relative_to(store.root) if path.is_absolute() else path
-        if relative != expected:
+        if relative != store.paths(symbol, manifest.dataset_id)[2]:
             raise _reject("context_manifest_path_identity_mismatch")
-        found[symbol] = (manifest, data, expected)
+        found[symbol] = (manifest, data, relative)
     if found["QQQ"][0].dataset_id == found["IWM"][0].dataset_id:
         raise _reject("duplicate_context_dataset")
     return found
@@ -389,6 +532,42 @@ def _phase3b_config(config_path: Path | None, frozen: FrozenParent) -> Phase3BCo
     )
 
 
+def _consumed_files(
+    root: Path, store: ContextStore, frozen: FrozenParent, gate: dict[str, Any]
+) -> tuple[Path, ...]:
+    """The COMPLETE set of artifacts any verifier or consumer reads."""
+    parent = [
+        root / "data" / kind / "alpaca/SPY/1Day/sip/all" / f"{frozen.dataset_id}.{suffix}"
+        for kind, suffix in (
+            ("manifests", "manifest.json"),
+            ("canonical", "canonical.csv"),
+            ("raw", "raw.json"),
+        )
+    ]
+    campaign_dir = root / "artifacts/research" / frozen.campaign_id
+    try:
+        campaign = sorted(campaign_dir.iterdir())
+    except OSError:
+        raise _reject("input_missing") from None
+    context = [
+        root / relative
+        for symbol, (manifest, _data, _path) in gate.items()
+        for relative in store.paths(symbol, manifest.dataset_id)
+    ]
+    return (*parent, *campaign, *context)
+
+
+def _snapshot(root: Path, files: tuple[Path, ...]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for path in files:
+        _require_private(path, root)
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
+            raise _reject("input_not_regular_file")
+        result[path.relative_to(root).as_posix()] = sha256_bytes(path.read_bytes())
+    return result
+
+
 def _verify_inputs(
     *,
     root: Path,
@@ -397,12 +576,15 @@ def _verify_inputs(
     config_path: Path | None,
     fixture_parent: FrozenParent | None,
     attestation: RuntimeAttestation,
+    runtime_fingerprint: str,
 ) -> _Verified:
     frozen = fixture_parent or REAL_PARENT
     if fixture_parent is not None and (
         fixture_parent.dataset_id == REAL_PARENT.dataset_id
         or fixture_parent.canonical_checksum == REAL_PARENT.canonical_checksum
         or fixture_parent.campaign_id == REAL_PARENT.campaign_id
+        or fixture_parent.campaign_index_sha256 == REAL_PARENT.campaign_index_sha256
+        or fixture_parent.campaign_manifest_sha256 == REAL_PARENT.campaign_manifest_sha256
     ):
         raise _reject("fixture_parent_must_differ_from_accepted_parent")
     evidence_kind = "retrospective_corrected" if fixture_parent is None else "synthetic_fixture"
@@ -410,23 +592,19 @@ def _verify_inputs(
     store = ContextStore(root)
     gate = _metadata_gate(store, qqq_manifest, iwm_manifest)  # BEFORE any observation read
 
+    files = _consumed_files(root, store, frozen, gate)
+    before = _snapshot(root, files)  # privacy of the complete set + exact bytes to be verified
+    campaign_prefix = f"artifacts/research/{frozen.campaign_id}/"
+    if (
+        before.get(campaign_prefix + "artifact_index.json") != frozen.campaign_index_sha256
+        or before.get(campaign_prefix + "experiment_manifest.json")
+        != frozen.campaign_manifest_sha256
+    ):
+        raise _reject("campaign_digest_not_pinned")
+
     parent_manifest_path = (
         root / "data/manifests/alpaca/SPY/1Day/sip/all" / f"{frozen.dataset_id}.manifest.json"
     )
-    parent_canonical_path = (
-        root / "data/canonical/alpaca/SPY/1Day/sip/all" / f"{frozen.dataset_id}.canonical.csv"
-    )
-    campaign_dir = root / "artifacts/research" / frozen.campaign_id
-    for private in (
-        parent_manifest_path,
-        parent_canonical_path,
-        campaign_dir,
-        *(campaign_dir / n for n in ("artifact_index.json", "experiment_manifest.json")),
-        *(root / item[2] for item in gate.values()),
-        *(root / store.paths(sym, gate[sym][0].dataset_id)[1] for sym in gate),
-    ):
-        _require_private(private, root)
-
     config = _phase3b_config(config_path, frozen)
     try:
         campaign_manifest = _verify_parent_campaign(root / "artifacts/research", root, config)
@@ -490,20 +668,22 @@ def _verify_inputs(
         if series[symbol].sessions != sessions:
             raise _reject("context_sessions_differ_from_eligible_source")
 
-    artifact_store = ResearchArtifactStore(root / "artifacts/research", repository_root=root)
+    if _snapshot(root, files) != before:
+        raise _reject("inputs_changed_during_verification")
     report = PreflightReport(
         evidence_kind=evidence_kind,
         git_commit=attestation.git_commit,
+        python_version=platform.python_version(),
+        runtime_fingerprint=runtime_fingerprint,
         parent_dataset_id=manifest.dataset_id,
         parent_canonical_checksum=manifest.canonical_content_checksum,
         parent_market_data_checksum=recomputed,
         parent_manifest_self_checksum=str(manifest.manifest_artifact_checksum),
         campaign_id=frozen.campaign_id,
-        campaign_index_sha256=artifact_store.checksum(frozen.campaign_id, "artifact_index.json"),
-        campaign_manifest_sha256=artifact_store.checksum(
-            frozen.campaign_id, "experiment_manifest.json"
-        ),
+        campaign_index_sha256=before[campaign_prefix + "artifact_index.json"],
+        campaign_manifest_sha256=before[campaign_prefix + "experiment_manifest.json"],
         research_slice_checksum=boundary.research_slice_checksum,
+        input_snapshot_sha256=sha256_json(before),
         source_rows=len(sessions),
         source_first_session=sessions[0].isoformat(),
         source_last_session=sessions[-1].isoformat(),
@@ -516,16 +696,27 @@ def _verify_inputs(
             for s in ("QQQ", "IWM")
         ),
     )
-    fingerprint = (
-        report.digest,
-        sha256_bytes(parent_manifest_path.read_bytes()),
-        *(sha256_bytes(gate[s][1]) for s in ("QQQ", "IWM")),
-        *(series[s].canonical_sha256 for s in ("QQQ", "IWM")),
-    )
     return _Verified(
-        report, manifest, parent, accepted_boundary, series["QQQ"], series["IWM"], frozen,
-        fingerprint,
-    )  # fmt: skip
+        report,
+        manifest,
+        parent,
+        accepted_boundary,
+        series["QQQ"],
+        series["IWM"],
+        frozen,
+        files,
+        before,
+    )
+
+
+def _recheck(root: Path, verified: _Verified, attestation: RuntimeAttestation, fp: str) -> None:
+    """Checkout, runtime identity and every consumed artifact must be unchanged."""
+    if (
+        _collect_runtime_attestation() != attestation
+        or _require_runtime_unchanged() != fp
+        or _snapshot(root.resolve(strict=True), verified.files) != verified.snapshot
+    ):
+        raise _reject("runtime_or_inputs_changed_during_evaluation")
 
 
 def eligibility_preflight(
@@ -538,10 +729,10 @@ def eligibility_preflight(
     _fixture_parent: FrozenParent | None = None,
 ) -> PreflightReport:
     """Verify everything and report identities. Never fits a model."""
-    _claim_process()
+    _claim_process("preflight")
     attestation = _collect_runtime_attestation()
     _require_runtime(attestation, pinned_commit)
-    _require_lineage_not_stale()
+    fingerprint = _require_runtime_unchanged()
     verified = _verify_inputs(
         root=repository_root,
         qqq_manifest=qqq_manifest,
@@ -549,12 +740,14 @@ def eligibility_preflight(
         config_path=phase3b_config_path,
         fixture_parent=_fixture_parent,
         attestation=attestation,
+        runtime_fingerprint=fingerprint,
     )
+    _recheck(repository_root, verified, attestation, fingerprint)
     return verified.report
 
 
 # ---------------------------------------------------------------------------
-# Authorization and output
+# Authorization, single-use execution marker and output
 # ---------------------------------------------------------------------------
 
 
@@ -569,7 +762,7 @@ def _load_authorization(root: Path, path: Path) -> ExperimentAuthorization:
         raise _reject("authorization_file_must_be_private_regular_file")
     if info.st_size > MAX_AUTHORIZATION_BYTES:
         raise _reject("authorization_file_too_large")
-    _require_ignored_untracked(root, resolved.relative_to(root))
+    _require_ignored_untracked(root, [resolved.relative_to(root)])
     try:
         auth = ExperimentAuthorization.model_validate_json(resolved.read_bytes())
     except (ValidationError, ValueError):
@@ -596,6 +789,65 @@ def _bind_authorization(
         raise _reject("authorization_does_not_match_verified_inputs")
 
 
+_ARTIFACT_NAMES: Final = (
+    "limitations.md",
+    "configuration.json",
+    "lineage.json",
+    "metrics.json",
+    "findings.json",
+    "authorization_record.json",
+    "artifact_index.json",
+)
+
+
+def _execution_key(report: PreflightReport) -> str:
+    return sha256_json(
+        {
+            "study_id": study.STUDY_ID,
+            "evidence_kind": report.evidence_kind,
+            "input_digest": report.input_digest,
+        }
+    )
+
+
+def _prepare_destination(root: Path, report: PreflightReport) -> None:
+    """Validate the destination BEFORE the evaluator can run; creates only owner-only dirs."""
+    base = Path(OUTPUT_ROOTS[report.evidence_kind])
+    probe = base / f"{NAMESPACES[report.evidence_kind]}{'0' * 64}"
+    marker = base / EXECUTIONS_DIRECTORY / f"{_execution_key(report)}.json"
+    _check_existing_chain(root, (*base.parts, EXECUTIONS_DIRECTORY))
+    _require_ignored_untracked(
+        root, [marker, *(probe / name for name in _ARTIFACT_NAMES)], tree=base
+    )
+    descriptor = _open_directory_chain(root, (*base.parts, EXECUTIONS_DIRECTORY), create=True)
+    os.close(descriptor)
+
+
+def _reserve_execution(root: Path, report: PreflightReport, auth: ExperimentAuthorization) -> None:
+    """Atomically consume the single execution allowed for these inputs; never retried."""
+    base = Path(OUTPUT_ROOTS[report.evidence_kind])
+    directory = _open_directory_chain(root, (*base.parts, EXECUTIONS_DIRECTORY), create=False)
+    try:
+        marker = canonical_json_bytes(
+            {
+                "schema_version": MARKER_SCHEMA,
+                "state": "reserved",
+                "study_id": study.STUDY_ID,
+                "evidence_kind": report.evidence_kind,
+                "input_digest": report.input_digest,
+                "authorization_id": auth.authorization_id,
+                "execution_authority": "none",
+                "disposition": "NO CANDIDATE PROMOTION",
+            }
+        )
+        try:
+            _write_exclusive(directory, f"{_execution_key(report)}.json", marker)
+        except FileExistsError:
+            raise _reject("execution_already_consumed_or_interrupted") from None
+    finally:
+        os.close(directory)
+
+
 def _strip_bins(value: Any) -> Any:
     """Reliability bins can hold one row's mean probability; they are never persisted."""
     if isinstance(value, dict):
@@ -617,10 +869,7 @@ def _assert_sanitized(value: Any) -> None:
 
 
 def _sanitized_documents(
-    payload: dict[str, Any],
-    report: PreflightReport,
-    auth: ExperimentAuthorization,
-    fingerprint: str,
+    payload: dict[str, Any], report: PreflightReport, auth: ExperimentAuthorization
 ) -> dict[str, Any]:
     lineage = json.loads(json.dumps(payload["lineage"]))
     membership = lineage.pop("fold_membership")
@@ -643,7 +892,7 @@ def _sanitized_documents(
     lineage["fold_membership_summary"] = summary
     lineage["adapter"] = {
         "adapter_id": ADAPTER_ID,
-        "runtime_fingerprint": fingerprint,
+        "runtime_fingerprint": report.runtime_fingerprint,
         "preflight_report": _plain(report),
     }
     folds = [
@@ -694,47 +943,63 @@ def _sanitized_documents(
     return documents
 
 
-def _write_outputs(
-    root: Path,
-    payload_json: str,
-    experiment_id: str,
-    evidence_kind: str,
-    report: PreflightReport,
-    auth: ExperimentAuthorization,
-    fingerprint: str,
-) -> ExperimentRecord:
-    relative_root = Path(OUTPUT_ROOTS[evidence_kind])
-    _require_ignored_untracked(root, relative_root / experiment_id / "artifact_index.json")
-    store = ResearchArtifactStore(root / relative_root, repository_root=root)
-    directory = store.experiment_dir(experiment_id)
-    if directory.exists() or directory.is_symlink():
-        raise _reject("output_already_exists_no_overwrite")
+def _publish(root: Path, evidence_kind: str, experiment_id: str, files: dict[str, bytes]) -> None:
+    """Exclusive private directory reservation, O_EXCL no-follow writes, index written last."""
+    match = _EXPERIMENT_ID.fullmatch(experiment_id)
+    if match is None or not experiment_id.startswith(NAMESPACES[evidence_kind]):
+        raise _reject("invalid_experiment_id_for_evidence_kind")
+    base = Path(OUTPUT_ROOTS[evidence_kind])
+    parent = _open_directory_chain(root, base.parts, create=True)
+    try:
+        try:
+            os.stat(experiment_id, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise _reject("output_already_exists_no_overwrite")
+        _require_ignored_untracked(
+            root, [base / experiment_id / name for name in _ARTIFACT_NAMES], tree=base
+        )
+        try:
+            os.mkdir(experiment_id, 0o700, dir_fd=parent)  # exclusive: fails if anything exists
+        except FileExistsError:
+            raise _reject("output_already_exists_no_overwrite") from None
+        directory = os.open(
+            experiment_id, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
+        )
+        try:
+            _check_directory(directory)
+            index = {name: sha256_bytes(data) for name, data in files.items()}
+            for name, data in files.items():
+                _write_exclusive(directory, name, data)
+            _write_exclusive(
+                directory,
+                "artifact_index.json",
+                canonical_json_bytes(
+                    {
+                        "experiment_id": experiment_id,
+                        "evidence_kind": evidence_kind,
+                        "adapter_id": ADAPTER_ID,
+                        "artifacts": dict(sorted(index.items())),
+                        "execution_authority": "none",
+                        "disposition": "NO CANDIDATE PROMOTION",
+                    }
+                ),
+            )  # written last: completion marker
+        finally:
+            os.close(directory)
+    finally:
+        os.close(parent)
+
+
+def _output_files(
+    payload_json: str, report: PreflightReport, auth: ExperimentAuthorization
+) -> dict[str, bytes]:
     payload = json.loads(payload_json)
-    documents = _sanitized_documents(payload, report, auth, fingerprint)
-    limitations = f"# Limitations\n\n{payload['limitations']}\n"
-    store.write_bytes(
-        experiment_id,
-        "limitations.md",
-        limitations.encode(),
-        expected_checksum=sha256_bytes(limitations.encode()),
-    )
-    directory.chmod(0o700)
-    index: dict[str, str] = {"limitations.md": sha256_bytes(limitations.encode())}
-    for name, document in documents.items():
-        index[name] = store.write_json(experiment_id, name, document)
-    index_checksum = store.write_json(
-        experiment_id,
-        "artifact_index.json",
-        {
-            "experiment_id": experiment_id,
-            "evidence_kind": evidence_kind,
-            "adapter_id": ADAPTER_ID,
-            "artifacts": dict(sorted(index.items())),
-            "execution_authority": "none",
-            "disposition": "NO CANDIDATE PROMOTION",
-        },
-    )  # written last: completion marker
-    return ExperimentRecord(experiment_id, directory, evidence_kind, index_checksum)
+    documents = _sanitized_documents(payload, report, auth)
+    files = {"limitations.md": f"# Limitations\n\n{payload['limitations']}\n".encode()}
+    files.update({name: canonical_json_bytes(doc) for name, doc in documents.items()})
+    return files
 
 
 def run_authorized_experiment(
@@ -748,11 +1013,11 @@ def run_authorized_experiment(
     _fixture_parent: FrozenParent | None = None,
 ) -> ExperimentRecord:
     """Evaluate once, only under an owner authorization bound to the verified inputs."""
-    _claim_process()
+    _claim_process("run")
     root = repository_root.resolve(strict=True)
     attestation = _collect_runtime_attestation()
     _require_runtime(attestation, pinned_commit)
-    before = _require_lineage_not_stale()
+    fingerprint = _require_runtime_unchanged()
     auth = _load_authorization(root, authorization_path)
     verified = _verify_inputs(
         root=root,
@@ -761,6 +1026,7 @@ def run_authorized_experiment(
         config_path=phase3b_config_path,
         fixture_parent=_fixture_parent,
         attestation=attestation,
+        runtime_fingerprint=fingerprint,
     )
     _bind_authorization(auth, verified.report, attestation)
     rights = study.OwnerRightsEvidence(
@@ -776,6 +1042,9 @@ def run_authorized_experiment(
             parent_campaign_id=verified.frozen.campaign_id,
         )
     )
+    _recheck(root, verified, attestation, fingerprint)
+    _prepare_destination(root, verified.report)  # destination valid BEFORE any fitting
+    _reserve_execution(root, verified.report, auth)  # atomic single use; no retry on failure
     result = study._evaluate_retrospective_study(
         parent_manifest=verified.manifest,
         parent_market_data=verified.market_data,
@@ -785,40 +1054,13 @@ def run_authorized_experiment(
         rights=rights,
         fixture_identity=fixture,
     )
-    # Source, dependencies, checkout and inputs must be unchanged throughout evaluation.
-    after_attestation = _collect_runtime_attestation()
-    if (
-        after_attestation != attestation
-        or _require_lineage_not_stale() != before
-        or _input_fingerprint(root, verified) != verified.fingerprint
-    ):
-        raise _reject("runtime_or_inputs_changed_during_evaluation")
-    return _write_outputs(
-        root,
-        result.payload_json,
+    _recheck(root, verified, attestation, fingerprint)
+    files = _output_files(result.payload_json, verified.report, auth)
+    _publish(root, result.evidence_kind, result.experiment_id, files)
+    directory = root / OUTPUT_ROOTS[result.evidence_kind] / result.experiment_id
+    return ExperimentRecord(
         result.experiment_id,
+        directory,
         result.evidence_kind,
-        verified.report,
-        auth,
-        before,
+        sha256_bytes((directory / "artifact_index.json").read_bytes()),
     )
-
-
-def _input_fingerprint(root: Path, verified: _Verified) -> tuple[str, ...]:
-    store = ContextStore(root)
-    parent = (
-        root
-        / "data/manifests/alpaca/SPY/1Day/sip/all"
-        / f"{verified.frozen.dataset_id}.manifest.json"
-    )
-    gated = []
-    canon = []
-    for series in (verified.qqq, verified.iwm):
-        manifest_path, canonical_path = (
-            store.paths(series.symbol, series.dataset_id)[2],
-            store.paths(series.symbol, series.dataset_id)[1],
-        )
-        with store.locked(create=False):
-            gated.append(sha256_bytes(store.read(manifest_path)))
-            canon.append(sha256_bytes(store.read(canonical_path)))
-    return (verified.report.digest, sha256_bytes(parent.read_bytes()), *gated, *canon)

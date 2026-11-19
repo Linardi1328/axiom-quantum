@@ -148,51 +148,69 @@ never real market data, credentials or the network.
 
 An offline adapter, `research/retrospective_adapter.py`, joins verified local inputs to the
 evaluator. It acquires nothing and reads no credentials. It has two entry points, each
-usable **once per process**: `eligibility_preflight` (never fits) and
+usable **once per process** (tracked separately): `eligibility_preflight` (never fits) and
 `run_authorized_experiment` (evaluates once, only under an owner authorization).
 
 - **Frozen parent evidence:** dataset `spy-v2p1-900ca75371bf05e25b1935b5`; canonical
   content checksum `3fbaed89…99df6c`; market-data checksum `09371762…bad6c2`; manifest
-  self-checksum `de296295…fee6b6`; campaign `spy-v2p3-dev-1f9a68f3dce8df02e3645468`. The
-  manifest self-checksum is `manifest.manifest_artifact_checksum` (not the hash of the
-  complete file). Existing verification is reused unchanged: `_verify_parent_campaign`,
-  `_load_verified_research_market_data`, `apply_phase2_final_test_session_isolation`
-  (mechanical boundary must equal the accepted campaign metadata exactly),
-  `verify_context_artifacts`, `ContextStore`, `bind_context_series` and the evaluator.
-- **Metadata gate first:** both QQQ/IWM manifests are read and checked (v2 schema only,
-  QQQ and IWM exactly, Alpaca SIP 1Day all-adjusted, 2018-01-02 to 2024-10-15, 1,708 XNYS
-  sessions, UNVERIFIED flags, canonical serialization, self-checksum and path identity)
-  **before** any raw or canonical observation is read. Different scope, v1 artifacts,
-  duplicates and protected-context scope are refused at this gate.
-- **No substitution:** the exact gated manifest, the re-read manifest bytes and the
-  canonical bytes consumed by the binder must equal what `verify_context_artifacts`
-  verified, and inputs are re-fingerprinted after evaluation. All input files must be
-  non-symlinks owned by the current user and not group/other writable.
-- **Runtime prerequisites (mechanical):** `python -I` (isolated), a clean Git checkout
-  (no modified or untracked files) at the owner-pinned 40-hex commit, an uncached
-  recomputation of the source/dependency closure equal to the one cached at import, and
-  unchanged checkout, closure and inputs after evaluation. The acquisition verifier
-  additionally requires the artifacts' recorded code/runtime lineage to equal the current
-  one, so QQQ/IWM capture must be performed at the same pinned commit.
-- **Authorization:** `run_authorized_experiment` needs a private (mode 0600),
-  git-ignored, untracked, owner-authored JSON file that binds the exact preflight report
-  digest (parent, campaign, boundary and both context datasets), the pinned commit, the
-  evidence class and the output destination, plus a rights reference. A Boolean cannot
-  authorize a run. The rights reference is recorded as an owner attestation
-  (`owner_attested_reference_not_verified_by_system`); this code cannot verify a licence,
-  and the file is an input-bound control, not a cryptographic signature.
-- **Output:** `artifacts/research/phase3cr/<experiment-id>/` for observed retrospective
-  runs and `artifacts/research/phase3cr_synthetic/<experiment-id>/` for fixtures. The
-  destination must be git-ignored and untracked, must not exist, is created with owner-only
-  permissions, never overwritten, and gets an integrity index written last. Persisted
-  content is sanitized aggregate/fold metrics, configuration, lineage (fold membership and
-  protected session lists replaced by checksums and counts), findings, limitations and the
-  authorization record. No prices, feature values, row probabilities, fitted estimators or
-  credentials are written. The real destination remains subject to owner approval before
-  any real execution.
-- **Evidence separation:** the only test seam supplies fixture parent identities and
-  switches evidence class to `synthetic_fixture`, namespace `aq-p3cr-synth-` and the
-  synthetic output root.
+  self-checksum `de296295…fee6b6` (`manifest.manifest_artifact_checksum`, not the hash of
+  the complete file); campaign `spy-v2p3-dev-1f9a68f3dce8df02e3645468`. The accepted
+  campaign's `artifact_index.json` (`e1934f41…5f60f`) and `experiment_manifest.json`
+  (`bdab6f06…3977f`) digests are **pinned**, so a self-consistently resealed campaign is
+  refused even though the existing verifier would accept it. Existing verification is
+  reused unchanged (`_verify_parent_campaign`, `_load_verified_research_market_data`,
+  Phase 2 isolation with exact boundary equality, `verify_context_artifacts`,
+  `ContextStore`, `bind_context_series`, the evaluator).
+- **Metadata gate first:** both manifest paths must have the exact v2 shape
+  `data/manifests/alpaca/<SYMBOL>/1Day/sip/all/aq-ctx-v2-<24 hex>.manifest.json` (right
+  symbols, v2 namespace, suffix, no traversal) **before any file is opened**; raw and
+  canonical paths are therefore never read. Only then are the manifests parsed and checked
+  (v2 schema, QQQ and IWM, Alpaca SIP 1Day all-adjusted, 2018-01-02 to 2024-10-15, 1,708
+  XNYS sessions, UNVERIFIED flags, canonical serialization, self-checksum, path identity)
+  before any raw or canonical observation is read.
+- **Complete input set:** every file any verifier or consumer reads (parent manifest,
+  canonical and raw; every file in the campaign directory; context manifest, raw and
+  canonical for both symbols) must be a non-symlink owned by the current user and not
+  group/other writable, and is hashed before verification, after verification, before
+  fitting and after fitting. The preflight report binds a digest of that whole snapshot.
+  The exact gated manifest bytes, re-read manifest and consumed canonical bytes must also
+  equal what `verify_context_artifacts` verified.
+- **Runtime identity (not cryptographic attestation):** `python -I`, a clean checkout at the
+  owner-pinned commit, and a fingerprint of the study and adapter source closure,
+  dependency versions and Python version. The baseline is captured **when the adapter
+  module is imported**; the fingerprint is recomputed at entry, at the end of preflight,
+  before and after fitting, and is bound into the report digest (so into the
+  authorization). Git probes ignore inherited `GIT_*` variables. This detects drift after
+  import and version differences; it is **not** loaded-code attestation and gives no
+  protection against an adversary using the same OS account, who could alter any private
+  file, the interpreter or the checkout. The acquisition verifier additionally requires
+  the artifacts' recorded code lineage to equal the current one, so capture must happen at
+  the pinned commit.
+- **Authorization and single use:** a run needs a private (0600), git-ignored, untracked,
+  owner-authored JSON file binding the exact report digest, pinned commit, evidence class
+  and destination, plus a rights reference. A Boolean cannot authorize. The rights
+  reference is recorded as `owner_attested_reference_not_verified_by_system`; this code
+  cannot verify a licence, and the file is not a cryptographic signature. Before any
+  fitting the adapter (1) validates the destination, then (2) atomically creates an
+  exclusive private marker `<output root>/executions/<key>.json` where the key is derived
+  from study, evidence class and the **input digest** (inputs only; a new authorization ID,
+  commit or runtime cannot bypass it). An existing marker, including one left by an
+  interrupted run, is rejected: there is no automatic retry and any reset is a manual,
+  separately authorized owner action.
+- **Output** (`artifacts/research/phase3cr/<id>/`; fixtures `phase3cr_synthetic/`): every
+  final path (and the marker) must be git-ignored and the output root must have no tracked
+  descendants; ancestors are walked descriptor-relative without following symlinks and
+  must be directories owned by the current user and not group/other writable; missing
+  directories are created exclusively with mode 0700. The experiment directory is reserved
+  by an exclusive 0700 `mkdir`, files are written with `O_EXCL|O_NOFOLLOW` mode 0600 (no
+  replacement, no later chmod), and the integrity index is written last. An existing or
+  partial directory is never reused. Persisted content is sanitized aggregate/fold metrics,
+  configuration, lineage (fold membership and protected-session lists replaced by checksums
+  and counts), findings, limitations and the authorization record; reliability bins are
+  omitted. The real destination remains subject to owner approval before any real run.
+- **Evidence separation:** the only test seam supplies fixture parent identities and pins
+  and switches the evidence class to `synthetic_fixture`, namespace `aq-p3cr-synth-` and
+  the synthetic output root.
 
 Remaining prerequisites before any real run (each needs separate owner authorization):
 bounded QQQ/IWM capture at the pinned commit with rights confirmation; approval of the

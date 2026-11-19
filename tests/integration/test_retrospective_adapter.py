@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -23,12 +24,17 @@ from unit.retrospective_adapter_helpers import (
     acquire_context,
     build_campaign,
     build_sandbox,
+    campaign_pins,
     clone,
     write_authorization,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 ATTESTED = adapter.RuntimeAttestation(isolated=True, git_commit=COMMIT, clean=True)
+
+
+def _fresh() -> None:
+    adapter._PROCESS.update(preflight=False, run=False)
 
 
 def _attested(*_args: object, **_kwargs: object) -> adapter.RuntimeAttestation:
@@ -39,9 +45,9 @@ def _attested(*_args: object, **_kwargs: object) -> adapter.RuntimeAttestation:
 def fresh_process_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """pytest is not an isolated, pinned process: attest explicitly, one process per test."""
     monkeypatch.setattr(adapter, "_collect_runtime_attestation", _attested)
-    adapter._PROCESS["used"] = False
+    _fresh()
     yield
-    adapter._PROCESS["used"] = False
+    _fresh()
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +56,7 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory) -> Sandbox:
 
 
 def _preflight(box: Sandbox, **overrides: Any) -> adapter.PreflightReport:
-    adapter._PROCESS["used"] = False
+    _fresh()
     args: dict[str, Any] = {
         "repository_root": box.root,
         "qqq_manifest": box.qqq_manifest,
@@ -63,7 +69,7 @@ def _preflight(box: Sandbox, **overrides: Any) -> adapter.PreflightReport:
 
 
 def _run(box: Sandbox, auth: Path, **overrides: Any) -> adapter.ExperimentRecord:
-    adapter._PROCESS["used"] = False
+    _fresh()
     args: dict[str, Any] = {
         "repository_root": box.root,
         "qqq_manifest": box.qqq_manifest,
@@ -112,6 +118,28 @@ def ran(
 @pytest.fixture
 def stub_evaluation(monkeypatch: pytest.MonkeyPatch, ran: Ran) -> None:
     monkeypatch.setattr(study, "_evaluate_retrospective_study", lambda **_k: ran.result)
+
+
+class Counter:
+    """Counts evaluator invocations; returns the cached synthetic result."""
+
+    def __init__(self, result: study.RetrospectiveStudyResult) -> None:
+        self.calls = 0
+        self.result = result
+        self.error: Exception | None = None
+
+    def __call__(self, **_kwargs: object) -> study.RetrospectiveStudyResult:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@pytest.fixture
+def counting(monkeypatch: pytest.MonkeyPatch, ran: Ran) -> Counter:
+    counter = Counter(ran.result)
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", counter)
+    return counter
 
 
 @pytest.fixture
@@ -173,6 +201,7 @@ def test_frozen_real_parent_evidence_is_exact() -> None:
             config_path=None,
             fixture_parent=real,
             attestation=ATTESTED,
+            runtime_fingerprint="0" * 64,
         )
 
 
@@ -245,30 +274,39 @@ def test_wrong_scope_is_rejected_before_any_observation_is_read(
 def test_v1_artifacts_symbol_swaps_and_duplicates_are_rejected_early(
     box: Sandbox, read_log: list[str]
 ) -> None:
-    v1 = box.root / "data/manifests/alpaca/QQQ/1Day/sip/all" / f"aq-ctx-v1-{'0' * 24}.manifest.json"
-    v1.write_text(json.dumps({"schema_version": "aq-qqq-iwm-context-acquisition-v1"}))
-    relative = v1.relative_to(box.root)
+    folder = box.root / "data/manifests/alpaca/QQQ/1Day/sip/all"
+    v1_namespace = folder / f"aq-ctx-v1-{'0' * 24}.manifest.json"
+    v1_namespace.write_text(json.dumps({"schema_version": "aq-qqq-iwm-context-acquisition-v1"}))
+    with pytest.raises(adapter.AdapterError, match="context_manifest_path_invalid"):
+        _preflight(box, qqq_manifest=v1_namespace.relative_to(box.root))
+    assert read_log == []  # the v1 namespace is refused structurally, unread
+    v1_content = folder / f"aq-ctx-v2-{'1' * 24}.manifest.json"
+    v1_content.write_text(json.dumps({"schema_version": "aq-qqq-iwm-context-acquisition-v1"}))
     with pytest.raises(adapter.AdapterError, match="context_manifest_unreadable_or_not_v2"):
-        _preflight(box, qqq_manifest=relative)
-    with pytest.raises(adapter.AdapterError, match="context_source_policy_mismatch"):
-        _preflight(box, qqq_manifest=box.iwm_manifest, iwm_manifest=box.qqq_manifest)
-    with pytest.raises(adapter.AdapterError, match="context_source_policy_mismatch"):
-        _preflight(box, iwm_manifest=box.qqq_manifest)
+        _preflight(box, qqq_manifest=v1_content.relative_to(box.root))
+    for swapped in (
+        {"qqq_manifest": box.iwm_manifest, "iwm_manifest": box.qqq_manifest},
+        {"iwm_manifest": box.qqq_manifest},
+    ):
+        with pytest.raises(adapter.AdapterError, match="context_manifest_path_invalid"):
+            _preflight(box, **swapped)
     assert all(name.endswith(".manifest.json") for name in read_log)
 
 
-def test_manifest_tampering_and_path_identity_are_rejected(box: Sandbox) -> None:
+def test_manifest_scope_tampering_is_rejected(box: Sandbox) -> None:
     path = box.root / box.qqq_manifest
     data = json.loads(path.read_text())
     data["row_count"] = 1707
     path.write_text(json.dumps(data))
     with pytest.raises(adapter.AdapterError, match="context_scope_differs_from_approved_range"):
         _preflight(box)
-    clean = clone(box, box.root.parent / "second")
-    path2 = clean.root / clean.qqq_manifest
-    path2.write_text(path2.read_text().replace("\n", "") + " ")
-    with pytest.raises(adapter.AdapterError):
-        _preflight(clean)
+
+
+def test_noncanonical_manifest_serialization_is_rejected(box: Sandbox) -> None:
+    path = box.root / box.qqq_manifest
+    path.write_text(path.read_text() + " ")  # valid scope, non-canonical bytes
+    with pytest.raises(adapter.AdapterError, match="context_manifest_checksum_mismatch"):
+        _preflight(box)
 
 
 # ---------------------------------------------------------------------------
@@ -303,8 +341,13 @@ def test_boundary_must_equal_the_accepted_campaign_metadata_exactly(box: Sandbox
         boundary["excluded_source_session_count"] += 1
 
     build_campaign(box.root, manifest, parent, boundary_edit=edit)
-    with pytest.raises(adapter.AdapterError, match="exclusion_boundary_differs"):
+    # Self-consistently resealed campaign: the old pins reject it outright ...
+    with pytest.raises(adapter.AdapterError, match="campaign_digest_not_pinned"):
         _preflight(box)
+    # ... and even with refreshed pins the mechanical boundary must still equal it exactly.
+    refreshed = replace(box.fixture_parent, **campaign_pins(box.root))
+    with pytest.raises(adapter.AdapterError, match="exclusion_boundary_differs"):
+        _preflight(box, _fixture_parent=refreshed)
 
 
 def test_wrong_frozen_checksums_are_rejected(box: Sandbox) -> None:
@@ -403,11 +446,16 @@ def test_runtime_prerequisites_are_enforced_mechanically() -> None:
 
 
 def test_real_attestation_detects_dirty_untracked_and_head(tmp_path: Path) -> None:
+    from unit.retrospective_adapter_helpers import git_env
+
+    environment = git_env()
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
-    subprocess.run([*git, "init", "-q", str(tmp_path)], check=True)
+    subprocess.run([*git, "init", "-q", str(tmp_path)], check=True, env=environment)
     (tmp_path / "a.txt").write_text("a")
-    subprocess.run([*git, "-C", str(tmp_path), "add", "a.txt"], check=True)
-    subprocess.run([*git, "-C", str(tmp_path), "commit", "-q", "-m", "x"], check=True)
+    subprocess.run([*git, "-C", str(tmp_path), "add", "a.txt"], check=True, env=environment)
+    subprocess.run(
+        [*git, "-C", str(tmp_path), "commit", "-q", "-m", "x"], check=True, env=environment
+    )
     head = subprocess.run(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True
     ).stdout.strip()
@@ -456,6 +504,38 @@ def test_stale_lineage_is_detected(sandbox: Sandbox, monkeypatch: pytest.MonkeyP
         _preflight(sandbox)
 
 
+def test_runtime_identity_is_bound_to_the_report_and_baselined_at_import(
+    sandbox: Sandbox, report: adapter.PreflightReport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert report.runtime_fingerprint == adapter._IMPORT_BASELINE
+    assert report.python_version == sys.version.split()[0]
+    assert replace(report, runtime_fingerprint="f" * 64).digest != report.digest
+    assert replace(report, python_version="0.0.0").digest != report.digest
+    assert replace(report, git_commit="b" * 40).digest != report.digest
+    # input_digest (single-use granularity) deliberately ignores commit and runtime
+    assert replace(report, runtime_fingerprint="f" * 64).input_digest == report.input_digest
+    monkeypatch.setattr(adapter, "_IMPORT_BASELINE", "0" * 64)
+    with pytest.raises(adapter.AdapterError, match="source_or_dependencies_changed_since_import"):
+        _preflight(sandbox)
+
+
+def test_dependency_or_source_drift_after_verification_is_detected(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = study._closure
+    calls: list[int] = []
+
+    def drifting(roots: tuple[str, ...]) -> Any:
+        calls.append(1)
+        checksums, versions = real(roots)
+        # first two calls are the baseline and the entry check; later ones simulate drift
+        return (checksums, {**versions, "scikit-learn": "0.0.0"} if len(calls) > 2 else versions)
+
+    monkeypatch.setattr(study, "_closure", drifting)
+    with pytest.raises(adapter.AdapterError, match="source_or_dependencies_changed_since_import"):
+        _preflight(sandbox)
+
+
 # ---------------------------------------------------------------------------
 # Authorization
 # ---------------------------------------------------------------------------
@@ -484,20 +564,24 @@ def test_authorization_is_required_and_must_bind_the_exact_inputs(
             _run(box, auth)
 
 
-@pytest.mark.usefixtures("stub_evaluation")
-def test_booleans_or_missing_rights_evidence_cannot_authorize(box: Sandbox) -> None:
+def test_booleans_or_missing_rights_evidence_cannot_authorize(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
     directory = box.root / ".local"
     directory.mkdir(exist_ok=True)
+    valid = json.loads(write_authorization(box.root, report.digest).read_text())
+    missing_rights = {k: v for k, v in valid.items() if k != "owner_rights_reference_id"}
     for name, body in (
         ("bool.json", {"authorized": True}),
         ("empty.json", {}),
-        ("norights.json", {"schema_version": "aq-p3cr-experiment-authorization-v1"}),
+        ("norights.json", missing_rights),  # a valid authorization minus only the rights ref
     ):
         path = directory / name
         path.write_text(json.dumps(body))
         path.chmod(0o600)
         with pytest.raises(adapter.AdapterError, match="authorization_invalid"):
             _run(box, path)
+    assert counting.calls == 0
 
 
 @pytest.mark.usefixtures("stub_evaluation")
@@ -538,7 +622,10 @@ def test_changes_during_evaluation_are_detected_before_anything_is_written(
     monkeypatch.setattr(study, "_evaluate_retrospective_study", mutate)
     with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
         _run(box, auth)
-    assert not (box.root / "artifacts/research/phase3cr_synthetic").exists()
+    assert not [
+        p for p in (box.root / "artifacts/research/phase3cr_synthetic").iterdir()
+        if p.name.startswith("aq-p3cr")
+    ]  # fmt: skip
 
     calls: list[int] = []
 
@@ -643,8 +730,12 @@ def test_output_is_immutable_indexed_private_and_never_overwritten(
     )
     before = {p.name: p.read_bytes() for p in directory.iterdir()}
     auth = write_authorization(ran.box.root, report.digest)
-    with pytest.raises(adapter.AdapterError, match="output_already_exists_no_overwrite"):
+    with pytest.raises(adapter.AdapterError, match="execution_already_consumed_or_interrupted"):
         _run(ran.box, auth)
+    with pytest.raises(adapter.AdapterError, match="output_already_exists_no_overwrite"):
+        adapter._publish(
+            ran.box.root, "synthetic_fixture", ran.record.experiment_id, {"limitations.md": b"x"}
+        )
     assert {p.name: p.read_bytes() for p in directory.iterdir()} == before
 
 
@@ -692,8 +783,9 @@ def test_adapter_has_no_network_credential_broker_or_acquisition_dependencies() 
         "spy_market_agent.broker",
     )
     assert not [m for m in imported for f in forbidden if m == f or m.startswith(f + ".")]
-    for needle in ("environ", "getenv", "acquire_historical", "StockHistorical"):
+    for needle in ("getenv", "environ.get", "environ[", "acquire_historical", "StockHistorical"):
         assert needle not in text
+    assert text.count("os.environ") == 1  # only the git-variable scrubbing helper
     assert "api_key" in adapter.FORBIDDEN_OUTPUT_KEYS
 
 
@@ -705,9 +797,492 @@ def test_run_has_no_network_side_effects(
 
     monkeypatch.setattr("socket.socket", forbidden)
     monkeypatch.setattr("socket.create_connection", forbidden)
-    monkeypatch.setattr(study, "_evaluate_retrospective_study", lambda **_k: ran.result)
-    record = _run(box, write_authorization(box.root, report.digest))
+    record = _run(box, write_authorization(box.root, report.digest))  # real evaluator
     assert record.experiment_id == ran.record.experiment_id
     assert (record.output_directory / "artifact_index.json").read_bytes() == (
         ran.record.output_directory / "artifact_index.json"
     ).read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# PR #102 remediation: H1 path gate, H2 single use, H3 safe publication, H4 pins/inputs
+# ---------------------------------------------------------------------------
+
+
+def test_misshapen_manifest_paths_are_rejected_before_any_read(
+    box: Sandbox, read_log: list[str]
+) -> None:
+    canonical = _canonical_path(box, "QQQ").relative_to(box.root)
+    raw = Path(
+        str(canonical).replace("/canonical/", "/raw/").replace(".canonical.csv", ".raw.json")
+    )
+    good = box.qqq_manifest
+    name = good.name
+    folder = good.parent
+    bad_paths = [
+        canonical,
+        raw,
+        folder / name.replace(".manifest.json", ".canonical.csv"),
+        folder / f"aq-ctx-v1-{'0' * 24}.manifest.json",
+        folder / "notes.manifest.json",
+        folder.parent / "x" / name,
+        Path("data/manifests/alpaca/IWM/1Day/sip/all") / name,  # wrong symbol directory
+        Path("../outside") / good,
+        Path("data/manifests") / name,
+        box.root.parent / "elsewhere" / good,
+    ]
+    for bad in bad_paths:
+        with pytest.raises(adapter.AdapterError, match="context_manifest_path_invalid"):
+            _preflight(box, qqq_manifest=bad)
+    # the second path is validated before the first valid manifest is opened
+    with pytest.raises(adapter.AdapterError, match="context_manifest_path_invalid"):
+        _preflight(box, iwm_manifest=canonical)
+    assert read_log == []
+
+
+def test_identical_manifest_paths_are_rejected_before_reading(
+    box: Sandbox, read_log: list[str]
+) -> None:
+    with pytest.raises(adapter.AdapterError, match="context_manifest_path_invalid"):
+        _preflight(box, iwm_manifest=box.qqq_manifest)
+    assert read_log == []
+
+
+def test_replay_with_new_authorization_ids_cannot_fit_twice(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    first = _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 1
+    assert first.output_directory.is_dir()
+    for identifier in ("auth-20260105-0001", "auth-20260106-9999"):  # even a brand-new ID
+        auth = write_authorization(box.root, report.digest, authorization_id=identifier)
+        with pytest.raises(adapter.AdapterError, match="execution_already_consumed_or_interrupted"):
+            _run(box, auth)
+    assert counting.calls == 1
+    markers = list((box.root / "artifacts/research/phase3cr_synthetic/executions").iterdir())
+    assert len(markers) == 1
+    assert markers[0].stat().st_mode & 0o077 == 0
+
+
+def test_interrupted_execution_is_never_retried(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    counting.error = RuntimeError("simulated crash during fitting")
+    with pytest.raises(RuntimeError):
+        _run(box, write_authorization(box.root, report.digest))
+    counting.error = None
+    with pytest.raises(adapter.AdapterError, match="execution_already_consumed_or_interrupted"):
+        _run(box, write_authorization(box.root, report.digest, authorization_id="auth-retry-0002"))
+    assert counting.calls == 1
+    directory = box.root / "artifacts/research/phase3cr_synthetic"
+    assert not [p for p in directory.iterdir() if p.name.startswith("aq-p3cr")]
+
+
+def test_concurrent_claims_allow_exactly_one_execution(
+    box: Sandbox, report: adapter.PreflightReport
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    adapter._prepare_destination(box.root, report)
+    auth = adapter.ExperimentAuthorization.model_validate(
+        json.loads(write_authorization(box.root, report.digest).read_text())
+    )
+    barrier = Barrier(8)
+
+    def claim(_: int) -> str:
+        barrier.wait()
+        try:
+            adapter._reserve_execution(box.root, report, auth)
+        except adapter.AdapterError as exc:
+            return str(exc)
+        return "claimed"
+
+    with ThreadPoolExecutor(8) as pool:
+        outcomes = list(pool.map(claim, range(8)))
+    assert outcomes.count("claimed") == 1
+    assert set(outcomes) - {"claimed"} == {"execution_already_consumed_or_interrupted"}
+
+
+def test_evaluator_is_not_invoked_when_authorization_or_destination_is_invalid(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    for overrides in (
+        {"report_digest": "f" * 64},
+        {"git_commit": "c" * 40},
+        {"output_destination": "artifacts/research/phase3cr"},
+        {"owner_rights_reference_id": "x"},
+    ):
+        with pytest.raises(adapter.AdapterError):
+            _run(box, write_authorization(box.root, report.digest, **overrides))
+    outside = box.root.parent / "redirected"
+    outside.mkdir()
+    research = box.root / "artifacts/research"
+    (research / "phase3cr_synthetic").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(adapter.AdapterError, match="output_ancestry_unsafe"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+    assert list(outside.iterdir()) == []  # nothing written through the redirect
+    executions = research / "phase3cr_synthetic"
+    executions.unlink()
+    executions.mkdir()
+    executions.chmod(0o777)
+    with pytest.raises(adapter.AdapterError, match="output_ancestry_unsafe"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+
+
+def test_every_output_path_and_tracked_descendants_are_checked_before_fitting(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    (box.root / ".gitignore").write_text(
+        "data/raw/*\ndata/canonical/*\ndata/manifests/*\n.local/\n"
+        "artifacts/research/*\n!artifacts/research/phase3cr_synthetic/\n"
+        "artifacts/research/phase3cr_synthetic/*/artifact_index.json\n"
+        "artifacts/research/phase3cr_synthetic/executions/\n"
+    )  # only the index and marker would be covered: metrics.json etc. would be committable
+    with pytest.raises(adapter.AdapterError, match="ignored_and_untracked"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+
+
+def test_tracked_files_under_the_output_root_block_the_run(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    output = box.root / "artifacts/research/phase3cr_synthetic"
+    output.mkdir(parents=True)
+    (output / "stray.json").write_text("{}")
+    from unit.retrospective_adapter_helpers import git_env
+
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(box.root),
+            "add",
+            "-f",
+            "artifacts/research/phase3cr_synthetic/stray.json",
+        ],
+        check=True,
+        env=git_env(),
+    )
+    with pytest.raises(adapter.AdapterError, match="ignored_and_untracked"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+
+
+def test_publication_is_exclusive_private_and_index_last(
+    box: Sandbox, monkeypatch: pytest.MonkeyPatch, ran: Ran
+) -> None:
+    name = ran.record.experiment_id
+    files = {n: n.encode() for n in adapter._ARTIFACT_NAMES if n != "artifact_index.json"}
+    modes: list[int] = []
+    written: list[str] = []
+    real_mkdir, real_write = os.mkdir, adapter._write_exclusive
+
+    def spy_mkdir(path: Any, mode: int = 0o777, **kwargs: Any) -> None:
+        if str(path) == name:
+            modes.append(mode)
+        real_mkdir(path, mode, **kwargs)
+
+    def spy_write(directory: int, file_name: str, data: bytes) -> None:
+        written.append(file_name)
+        real_write(directory, file_name, data)
+
+    monkeypatch.setattr(os, "mkdir", spy_mkdir)
+    monkeypatch.setattr(adapter, "_write_exclusive", spy_write)
+    adapter._prepare_destination(box.root, ran_report(ran))
+    adapter._publish(box.root, "synthetic_fixture", name, files)
+    assert modes == [0o700]  # private at creation; never chmod'ed afterwards
+    assert written[-1] == "artifact_index.json"
+    assert sorted(written[:-1]) == sorted(files)
+    directory = box.root / "artifacts/research/phase3cr_synthetic" / name
+    assert directory.stat().st_mode & 0o077 == 0
+    with pytest.raises(adapter.AdapterError, match="output_already_exists_no_overwrite"):
+        adapter._publish(box.root, "synthetic_fixture", name, files)
+
+
+def ran_report(ran: Ran) -> adapter.PreflightReport:
+    return adapter.PreflightReport(**_report_from_output(ran))
+
+
+def _report_from_output(ran: Ran) -> dict[str, Any]:
+    document = json.loads((ran.record.output_directory / "lineage.json").read_text())
+    fields = dict(document["lineage"]["adapter"]["preflight_report"])
+    fields["context"] = tuple(tuple(item) for item in fields["context"])
+    return fields
+
+
+def test_symlinked_or_partial_experiment_directories_are_never_reused(
+    box: Sandbox, ran: Ran
+) -> None:
+    name = ran.record.experiment_id
+    base = box.root / "artifacts/research/phase3cr_synthetic"
+    adapter._open_directory_chain(
+        box.root, ("artifacts", "research", "phase3cr_synthetic"), create=True
+    )
+    target = box.root.parent / "elsewhere"
+    target.mkdir()
+    (base / name).symlink_to(target, target_is_directory=True)
+    with pytest.raises(adapter.AdapterError, match="output_already_exists_no_overwrite"):
+        adapter._publish(box.root, "synthetic_fixture", name, {"limitations.md": b"x"})
+    assert list(target.iterdir()) == []
+    (base / name).unlink()
+    (base / name).mkdir()
+    (base / name / "metrics.json").write_text("partial")
+    with pytest.raises(adapter.AdapterError, match="output_already_exists_no_overwrite"):
+        adapter._publish(box.root, "synthetic_fixture", name, {"limitations.md": b"x"})
+    assert (base / name / "metrics.json").read_text() == "partial"
+
+
+def test_concurrent_publication_has_one_winner_and_a_consistent_index(
+    box: Sandbox, ran: Ran
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    name = ran.record.experiment_id
+    barrier = Barrier(6)
+
+    def publish(index: int) -> str:
+        files = {n: f"writer-{index}".encode() for n in adapter._ARTIFACT_NAMES[:-1]}
+        barrier.wait()
+        try:
+            adapter._publish(box.root, "synthetic_fixture", name, files)
+        except adapter.AdapterError as exc:
+            return str(exc)
+        return f"won-{index}"
+
+    with ThreadPoolExecutor(6) as pool:
+        outcomes = list(pool.map(publish, range(6)))
+    winners = [o for o in outcomes if o.startswith("won-")]
+    assert len(winners) == 1
+    assert set(outcomes) - set(winners) == {"output_already_exists_no_overwrite"}
+    directory = box.root / "artifacts/research/phase3cr_synthetic" / name
+    index = json.loads((directory / "artifact_index.json").read_text())
+    for artifact, digest in index["artifacts"].items():
+        assert adapter.sha256_bytes((directory / artifact).read_bytes()) == digest
+        assert (directory / artifact).read_bytes() == winners[0].replace("won-", "writer-").encode()
+
+
+def test_invalid_experiment_ids_cannot_escape_or_cross_namespaces(box: Sandbox) -> None:
+    for bad in (
+        "../escape",
+        "aq-p3cr-retro-" + "0" * 64,  # retrospective ID into the synthetic root
+        "aq-p3cr-synth-" + "0" * 63,
+        "aq-p3cr-synth-" + "G" * 64,
+    ):
+        with pytest.raises(adapter.AdapterError, match="invalid_experiment_id"):
+            adapter._publish(box.root, "synthetic_fixture", bad, {"limitations.md": b"x"})
+
+
+# H4 ----------------------------------------------------------------------------------
+
+
+def test_real_campaign_digests_are_pinned_to_the_locally_verified_values() -> None:
+    real = adapter.REAL_PARENT
+    assert real.campaign_index_sha256 == (
+        "e1934f41878f26d680ec2ec3a76744b6d7c9431e4eda6d02ac54ec5781c5f60f"
+    )
+    assert real.campaign_manifest_sha256 == (
+        "bdab6f063aa0ab56f6c72b9d29c1257ed72398355de6029ad03b3bf40193977f"
+    )
+    with pytest.raises(adapter.AdapterError, match="fixture_parent_must_differ"):
+        adapter._verify_inputs(
+            root=ROOT,
+            qqq_manifest=Path("x"),
+            iwm_manifest=Path("y"),
+            config_path=None,
+            fixture_parent=replace(
+                _distinct_fixture(), campaign_index_sha256=real.campaign_index_sha256
+            ),
+            attestation=ATTESTED,
+            runtime_fingerprint="0" * 64,
+        )
+
+
+def _distinct_fixture() -> adapter.FrozenParent:
+    return adapter.FrozenParent(
+        dataset_id="spy-v2p1-" + "1" * 24,
+        canonical_checksum="2" * 64,
+        market_data_checksum="3" * 64,
+        manifest_self_checksum="4" * 64,
+        campaign_id="spy-v2p3-dev-" + "5" * 24,
+        campaign_index_sha256="6" * 64,
+        campaign_manifest_sha256="7" * 64,
+    )
+
+
+def _omitted_file_paths(box: Sandbox) -> dict[str, Path]:
+    store_root = box.root
+    parent_id = box.fixture_parent.dataset_id
+    qqq = json.loads((box.root / box.qqq_manifest).read_text())
+    return {
+        "parent_raw": store_root / f"data/raw/alpaca/SPY/1Day/sip/all/{parent_id}.raw.json",
+        "context_raw": store_root / qqq["generated_paths"]["raw"],
+        "campaign_registry": store_root
+        / "artifacts/research"
+        / box.fixture_parent.campaign_id
+        / "model_registry.json",
+    }
+
+
+@pytest.mark.parametrize("which", ["parent_raw", "context_raw", "campaign_registry"])
+def test_previously_unchecked_inputs_must_also_be_private(box: Sandbox, which: str) -> None:
+    _omitted_file_paths(box)[which].chmod(0o664)
+    with pytest.raises(adapter.AdapterError, match="input_not_privately_owned"):
+        _preflight(box)
+
+
+@pytest.mark.parametrize(
+    "which", ["parent_raw", "context_raw", "campaign_registry", "parent_canonical"]
+)
+def test_mutating_any_consumed_artifact_during_evaluation_is_detected(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    monkeypatch: pytest.MonkeyPatch,
+    which: str,
+) -> None:
+    paths = _omitted_file_paths(box)
+    paths["parent_canonical"] = (
+        box.root
+        / "data/canonical/alpaca/SPY/1Day/sip/all"
+        / f"{box.fixture_parent.dataset_id}.canonical.csv"
+    )
+    target = paths[which]
+
+    def mutate(**_k: object) -> study.RetrospectiveStudyResult:
+        counting.calls += 1
+        target.write_bytes(target.read_bytes() + b" ")
+        return counting.result
+
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", mutate)
+    with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert not [
+        p for p in (box.root / "artifacts/research/phase3cr_synthetic").iterdir()
+        if p.name.startswith("aq-p3cr")
+    ]  # fmt: skip
+
+
+def test_report_binds_the_complete_input_snapshot(
+    box: Sandbox, report: adapter.PreflightReport
+) -> None:
+    again = _preflight(box)
+    assert again.input_snapshot_sha256 == report.input_snapshot_sha256
+    _omitted_file_paths(box)["context_raw"].write_bytes(b"{}")
+    with pytest.raises(adapter.AdapterError):
+        _preflight(box)
+
+
+# M1 ----------------------------------------------------------------------------------
+
+
+def test_real_isolated_processes_end_to_end(tmp_path: Path) -> None:
+    """Fresh interpreters (python -I): attestation, preflight, authorized run and replay."""
+    code = _code_checkout(tmp_path / "code")
+    data = tmp_path / "data_repo"
+    data.mkdir()
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}
+    build = (
+        "import json, sys, dataclasses\n"
+        "from pathlib import Path\n"
+        "from unit.retrospective_adapter_helpers import build_sandbox\n"
+        "box = build_sandbox(Path(sys.argv[1]))\n"
+        "print(json.dumps({'qqq': str(box.qqq_manifest), 'iwm': str(box.iwm_manifest),"
+        " 'parent': dataclasses.asdict(box.fixture_parent)}))\n"
+    )
+    built = subprocess.run(
+        [sys.executable, "-c", build, str(data)],
+        capture_output=True,
+        text=True,
+        cwd=code,
+        env={**env, "PYTHONPATH": f"{code / 'src'}{os.pathsep}{ROOT / 'tests'}"},
+    )
+    assert built.returncode == 0, built.stderr[-2000:]
+    spec = json.loads(built.stdout.strip().splitlines()[-1])
+    commit = subprocess.run(
+        ["git", "-C", str(code), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    def invoke(
+        mode: str, *, isolated: bool = True, pin: str = commit, auth: str = ""
+    ) -> dict[str, Any]:
+        driver = (
+            "import json, sys\n"
+            f"sys.path.insert(0, {str(code / 'src')!r})\n"
+            "from pathlib import Path\n"
+            "from spy_market_agent.research import retrospective_adapter as a\n"
+            f"assert str(Path(a.__file__).resolve()).startswith({str(code.resolve())!r})\n"
+            f"spec = {spec!r}\n"
+            "parent = a.FrozenParent(**spec['parent'])\n"
+            f"kw = dict(repository_root=Path({str(data)!r}), qqq_manifest=Path(spec['qqq']),"
+            f" iwm_manifest=Path(spec['iwm']), pinned_commit={pin!r}, _fixture_parent=parent)\n"
+            "try:\n"
+            f"    if {mode!r} == 'preflight':\n"
+            "        r = a.eligibility_preflight(**kw)\n"
+            "        out = {'ok': True, 'digest': r.digest, 'fingerprint': r.runtime_fingerprint,"
+            " 'python': r.python_version}\n"
+            "    else:\n"
+            f"        rec = a.run_authorized_experiment(authorization_path=Path({auth!r}), **kw)\n"
+            "        out = {'ok': True, 'experiment_id': rec.experiment_id}\n"
+            "except a.AdapterError as exc:\n"
+            "    out = {'ok': False, 'error': str(exc)}\n"
+            "print(json.dumps(out))\n"
+        )
+        flags = ["-I"] if isolated else []
+        done = subprocess.run(
+            [sys.executable, *flags, "-c", driver],
+            capture_output=True,
+            text=True,
+            cwd=code,
+            env=env,
+        )
+        assert done.returncode == 0, done.stderr[-2000:]
+        return json.loads(done.stdout.strip().splitlines()[-1])  # type: ignore[no-any-return]
+
+    first = invoke("preflight")
+    assert first["ok"], first
+    assert first["python"] == sys.version.split()[0]
+    assert invoke("preflight")["digest"] == first["digest"]  # deterministic across processes
+    assert invoke("preflight", isolated=False) == {"ok": False, "error": "process_not_isolated"}
+    assert invoke("preflight", pin="d" * 40) == {
+        "ok": False,
+        "error": "checkout_not_at_pinned_commit",
+    }
+    (code / "stray.txt").write_text("untracked")
+    assert invoke("preflight") == {"ok": False, "error": "checkout_not_clean"}
+    (code / "stray.txt").unlink()
+
+    auth = write_authorization(data, first["digest"], git_commit=commit)
+    ran_once = invoke("run", auth=str(auth))
+    assert ran_once["ok"], ran_once
+    assert ran_once["experiment_id"].startswith("aq-p3cr-synth-")
+    replay = invoke("run", auth=str(auth))  # a brand-new real process: single use enforced
+    assert replay == {"ok": False, "error": "execution_already_consumed_or_interrupted"}
+    other = write_authorization(
+        data, first["digest"], git_commit=commit, authorization_id="auth-new-9999"
+    )
+    assert invoke("run", auth=str(other))["error"] == "execution_already_consumed_or_interrupted"
+
+
+def _code_checkout(destination: Path) -> Path:
+    """A clean, committed copy of the code under test (no dependency on the dev worktree)."""
+    from unit.retrospective_adapter_helpers import git_env
+
+    destination.mkdir()
+    for name in ("src", "configs", "pyproject.toml", ".gitignore"):
+        source = ROOT / name
+        if source.is_dir():
+            shutil.copytree(
+                source, destination / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+            )
+        else:
+            shutil.copy2(source, destination / name)
+    environment = git_env()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(destination)]
+    subprocess.run([*git, "init", "-q"], check=True, env=environment)
+    subprocess.run([*git, "add", "-A"], check=True, env=environment)
+    subprocess.run([*git, "commit", "-q", "-m", "snapshot"], check=True, env=environment)
+    return destination

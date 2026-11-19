@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -15,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
+from spy_market_agent.benchmark.artifacts import sha256_bytes
 from spy_market_agent.market_data.acquisition import (
     MarketDataCredentials,
     PaginationMetadata,
@@ -44,6 +46,11 @@ CAMPAIGN_ID = "spy-v2p3-dev-" + "0" * 24
 GITIGNORE = "data/raw/*\ndata/canonical/*\ndata/manifests/*\nartifacts/research/*\n.local/\n"
 APPROVED_START = date(2018, 1, 2)
 APPROVED_END = date(2024, 10, 15)
+
+
+def git_env() -> dict[str, str]:
+    """Environment for fixture git commands: never inherit a caller's repository selection."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
 def _stamp(session: date) -> str:
@@ -182,6 +189,16 @@ def build_campaign(
     )
 
 
+def campaign_pins(root: Path, campaign_id: str = CAMPAIGN_ID) -> dict[str, str]:
+    directory = root / "artifacts/research" / campaign_id
+    return {
+        "campaign_index_sha256": sha256_bytes((directory / "artifact_index.json").read_bytes()),
+        "campaign_manifest_sha256": sha256_bytes(
+            (directory / "experiment_manifest.json").read_bytes()
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class Sandbox:
     root: Path
@@ -191,7 +208,7 @@ class Sandbox:
 
 
 def build_sandbox(root: Path) -> Sandbox:
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, env=git_env())
     (root / ".gitignore").write_text(GITIGNORE)
     manifest_path = write_synthetic_phase1_dataset(
         root, start=APPROVED_START, end=date(2025, 12, 31)
@@ -211,6 +228,7 @@ def build_sandbox(root: Path) -> Sandbox:
         market_data_checksum=compute_market_data_checksum(parent.data),
         manifest_self_checksum=str(manifest.manifest_artifact_checksum),
         campaign_id=CAMPAIGN_ID,
+        **campaign_pins(root),
     )
     return Sandbox(root, qqq, iwm, fixture_parent)
 
