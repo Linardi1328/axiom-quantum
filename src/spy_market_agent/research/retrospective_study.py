@@ -388,15 +388,20 @@ def _resolve_import(path: Path, package_root: Path, node: ast.ImportFrom | ast.I
 
 @lru_cache(maxsize=1)
 def _transitive_lineage() -> tuple[dict[str, str], dict[str, str]]:
+    """Cached closure from this module (see ``_closure``; callers may recompute uncached)."""
+    return _closure((str(Path(__file__).resolve()),))
+
+
+def _closure(roots: tuple[str, ...]) -> tuple[dict[str, str], dict[str, str]]:
     """Checksums of every in-package source file reachable by import, plus third-party versions.
 
-    The closure is computed by static import analysis from this module, so the identity
-    covers the code that actually runs (calendar, benchmark splits/locks, feature models,
-    research constants, ...) rather than a hand-maintained list that can go stale.
+    The closure is computed by static import analysis from the given root files, so the
+    identity covers the code that actually runs (calendar, benchmark splits/locks, feature
+    models, research constants, ...) rather than a hand-maintained list that can go stale.
     """
     package_root = Path(__file__).resolve().parents[1]
     root_name = package_root.name
-    pending = [Path(__file__).resolve()]
+    pending = [Path(root).resolve() for root in roots]
     sources: dict[str, Path] = {}
     third_party: set[str] = set()
     while pending:
