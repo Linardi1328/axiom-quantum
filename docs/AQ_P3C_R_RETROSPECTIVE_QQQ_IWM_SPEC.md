@@ -161,26 +161,32 @@ usable **once per process** (tracked separately): `eligibility_preflight` (never
   reused unchanged (`_verify_parent_campaign`, `_load_verified_research_market_data`,
   Phase 2 isolation with exact boundary equality, `verify_context_artifacts`,
   `ContextStore`, `bind_context_series`, the evaluator).
-- **Metadata gate first:** both manifest paths must have the exact v2 shape
+- **Metadata gate:** the adapter first reads its own source files (runtime fingerprint and
+  Git status) and loads the authorization file; neither touches context data. Both context
+  manifest paths must then have the exact v2 shape
   `data/manifests/alpaca/<SYMBOL>/1Day/sip/all/aq-ctx-v2-<24 hex>.manifest.json` (right
-  symbols, v2 namespace, suffix, no traversal) **before any file is opened**; raw and
-  canonical paths are therefore never read. Only then are the manifests parsed and checked
-  (v2 schema, QQQ and IWM, Alpaca SIP 1Day all-adjusted, 2018-01-02 to 2024-10-15, 1,708
-  XNYS sessions, UNVERIFIED flags, canonical serialization, self-checksum, path identity)
-  before any raw or canonical observation is read.
+  symbols, v2 namespace, suffix, no traversal) **before either manifest is opened**, so raw
+  and canonical paths are never read. Both manifests are then parsed and checked (v2 schema,
+  QQQ and IWM, Alpaca SIP 1Day all-adjusted, 2018-01-02 to 2024-10-15, 1,708 XNYS sessions,
+  UNVERIFIED flags, canonical serialization, self-checksum, path identity), and **only
+  after both pass** are any raw or canonical observations read (by the verifier and the
+  binder).
 - **Complete input set:** every file any verifier or consumer reads (parent manifest,
   canonical and raw; every file in the campaign directory; context manifest, raw and
   canonical for both symbols) must be a non-symlink owned by the current user and not
   group/other writable, and is hashed before verification, after verification, before
   fitting and after fitting. The preflight report binds a digest of that whole snapshot.
   The exact gated manifest bytes, re-read manifest and consumed canonical bytes must also
-  equal what `verify_context_artifacts` verified.
+  equal what `verify_context_artifacts` verified. The Phase 3B configuration is part of the
+  snapshot: real input may only use the verified default inside the pinned, clean checkout
+  (an override path is refused); a fixture override is hashed and rechecked like any other
+  input.
 - **Runtime identity (not cryptographic attestation):** `python -I`, a clean checkout at the
   owner-pinned commit, and a fingerprint of the study and adapter source closure,
   dependency versions and Python version. The baseline is captured **when the adapter
   module is imported**; the fingerprint is recomputed at entry, at the end of preflight,
   before and after fitting, and is bound into the report digest (so into the
-  authorization). Git probes ignore inherited `GIT_*` variables. This detects drift after
+  authorization). Git probes ignore inherited `GIT_*` variables and force `core.fsmonitor=false` so no configured hook runs. This detects drift after
   import and version differences; it is **not** loaded-code attestation and gives no
   protection against an adversary using the same OS account, who could alter any private
   file, the interpreter or the checkout. The acquisition verifier additionally requires
@@ -194,12 +200,16 @@ usable **once per process** (tracked separately): `eligibility_preflight` (never
   fitting the adapter (1) validates the destination, then (2) atomically creates an
   exclusive private marker `<output root>/executions/<key>.json` where the key is derived
   from study, evidence class and the **input digest** (inputs only; a new authorization ID,
-  commit or runtime cannot bypass it). An existing marker, including one left by an
-  interrupted run, is rejected: there is no automatic retry and any reset is a manual,
+  commit or runtime cannot bypass it). The marker file and its directory entry (and any newly created ancestor
+  entries) are fsynced before fitting, and a sync failure stops the run without fitting. An
+  existing marker, including one left by an interrupted run, is rejected: there is no automatic retry and any reset is a manual,
   separately authorized owner action.
-- **Output** (`artifacts/research/phase3cr/<id>/`; fixtures `phase3cr_synthetic/`): every
-  final path (and the marker) must be git-ignored and the output root must have no tracked
-  descendants; ancestors are walked descriptor-relative without following symlinks and
+- **Output** (`artifacts/research/phase3cr/<id>/`; fixtures `phase3cr_synthetic/`): the
+  whole output directory must itself be git-ignored (Git cannot re-include files of an
+  ignored directory), have no tracked descendants, and every final path and the marker are
+  re-checked, all before the authorization is consumed or anything is fitted; "untracked"
+  requires a successful `ls-files` query with an empty listing, so a Git error fails
+  closed; ancestors are walked descriptor-relative without following symlinks and
   must be directories owned by the current user and not group/other writable; missing
   directories are created exclusively with mode 0700. The experiment directory is reserved
   by an exclusive 0700 `mkdir`, files are written with `O_EXCL|O_NOFOLLOW` mode 0600 (no

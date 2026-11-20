@@ -23,7 +23,6 @@ OS account, which could rewrite any of these files or the interpreter.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import platform
@@ -251,6 +250,7 @@ class _Verified:
     iwm: RetrospectiveContextSeries
     frozen: FrozenParent
     files: tuple[Path, ...]
+    config_file: Path
     snapshot: dict[str, str]
 
 
@@ -261,8 +261,14 @@ class _Verified:
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # core.fsmonitor is forced off so a configured hook can never execute during a probe.
     return subprocess.run(
-        ["git", *args], cwd=cwd, env=environment, capture_output=True, text=True, check=False
+        ["git", "-c", "core.fsmonitor=false", *args],
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -357,16 +363,38 @@ def _require_private(path: Path, root: Path) -> None:
 def _require_ignored_untracked(
     root: Path, relatives: list[Path], *, tree: Path | None = None
 ) -> None:
-    """Every path must be ignored and untracked; ``tree`` must have no tracked descendants."""
+    """Every path must be ignored and untracked; ``tree`` must have no tracked descendants.
+
+    "Untracked" requires a successful ``ls-files`` query with an empty listing, so an
+    unreadable or corrupt index fails closed instead of reading as untracked.
+    """
     for relative in relatives:
         ignored = _git(["check-ignore", "--no-index", "-q", "--", relative.as_posix()], root)
-        tracked = _git(["ls-files", "--error-unmatch", "--", relative.as_posix()], root)
-        if ignored.returncode != 0 or tracked.returncode == 0:
+        listing = _git(["ls-files", "--", relative.as_posix()], root)
+        if ignored.returncode != 0 or listing.returncode != 0 or listing.stdout.strip():
             raise _reject("path_must_be_ignored_and_untracked")
     if tree is not None:
         listing = _git(["ls-files", "--", tree.as_posix()], root)
         if listing.returncode != 0 or listing.stdout.strip():
             raise _reject("path_must_be_ignored_and_untracked")
+
+
+def _require_ignored_directory(root: Path, directory: Path) -> None:
+    """The (existing) directory itself must be ignored; git cannot re-include its files.
+
+    The path is given without a trailing slash: an existing directory is recognised as one,
+    whereas ``dir/`` also matches a ``dir/*`` rule that ignores only the directory contents.
+    """
+    ignored = _git(["check-ignore", "--no-index", "-q", "--", directory.as_posix()], root)
+    if ignored.returncode != 0:
+        raise _reject("path_must_be_ignored_and_untracked")
+
+
+def _fsync_directory(descriptor: int) -> None:
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        raise _reject("durability_not_established") from None
 
 
 def _check_directory(descriptor: int) -> None:
@@ -386,8 +414,12 @@ def _open_directory_chain(root: Path, parts: tuple[str, ...], *, create: bool) -
         _check_directory(descriptor)
         for part in parts:
             if create:
-                with contextlib.suppress(FileExistsError):
+                try:
                     os.mkdir(part, 0o700, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                else:
+                    _fsync_directory(descriptor)  # persist the new entry in its parent
             following = os.open(part, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = following
@@ -515,9 +547,9 @@ def _metadata_gate(
 # ---------------------------------------------------------------------------
 
 
-def _phase3b_config(config_path: Path | None, frozen: FrozenParent) -> Phase3BConfig:
+def _phase3b_config(config_path: Path, frozen: FrozenParent) -> Phase3BConfig:
     try:
-        config = load_phase3b_config(config_path or _code_repository() / DEFAULT_PHASE3B_CONFIG)
+        config = load_phase3b_config(config_path)
     except Exception:
         raise _reject("phase3b_config_invalid") from None
     if frozen == REAL_PARENT:
@@ -557,7 +589,7 @@ def _consumed_files(
     return (*parent, *campaign, *context)
 
 
-def _snapshot(root: Path, files: tuple[Path, ...]) -> dict[str, str]:
+def _snapshot(root: Path, files: tuple[Path, ...], config_file: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     for path in files:
         _require_private(path, root)
@@ -565,6 +597,14 @@ def _snapshot(root: Path, files: tuple[Path, ...]) -> dict[str, str]:
         if not stat.S_ISREG(info.st_mode):
             raise _reject("input_not_regular_file")
         result[path.relative_to(root).as_posix()] = sha256_bytes(path.read_bytes())
+    # The Phase 3B configuration used by the verifier is part of the verified input set.
+    try:
+        info = os.lstat(config_file)
+        if not stat.S_ISREG(info.st_mode):
+            raise _reject("phase3b_config_invalid")
+        result["phase3b_config"] = sha256_bytes(config_file.read_bytes())
+    except OSError:
+        raise _reject("phase3b_config_invalid") from None
     return result
 
 
@@ -579,6 +619,10 @@ def _verify_inputs(
     runtime_fingerprint: str,
 ) -> _Verified:
     frozen = fixture_parent or REAL_PARENT
+    if fixture_parent is None and config_path is not None:
+        # Real input uses only the verified default inside the pinned, clean checkout.
+        raise _reject("phase3b_config_override_not_permitted_for_real_input")
+    config_file = config_path or _code_repository() / DEFAULT_PHASE3B_CONFIG
     if fixture_parent is not None and (
         fixture_parent.dataset_id == REAL_PARENT.dataset_id
         or fixture_parent.canonical_checksum == REAL_PARENT.canonical_checksum
@@ -593,7 +637,9 @@ def _verify_inputs(
     gate = _metadata_gate(store, qqq_manifest, iwm_manifest)  # BEFORE any observation read
 
     files = _consumed_files(root, store, frozen, gate)
-    before = _snapshot(root, files)  # privacy of the complete set + exact bytes to be verified
+    before = _snapshot(
+        root, files, config_file
+    )  # privacy of the complete set + exact bytes to be verified
     campaign_prefix = f"artifacts/research/{frozen.campaign_id}/"
     if (
         before.get(campaign_prefix + "artifact_index.json") != frozen.campaign_index_sha256
@@ -605,7 +651,7 @@ def _verify_inputs(
     parent_manifest_path = (
         root / "data/manifests/alpaca/SPY/1Day/sip/all" / f"{frozen.dataset_id}.manifest.json"
     )
-    config = _phase3b_config(config_path, frozen)
+    config = _phase3b_config(config_file, frozen)
     try:
         campaign_manifest = _verify_parent_campaign(root / "artifacts/research", root, config)
     except Exception:
@@ -668,7 +714,7 @@ def _verify_inputs(
         if series[symbol].sessions != sessions:
             raise _reject("context_sessions_differ_from_eligible_source")
 
-    if _snapshot(root, files) != before:
+    if _snapshot(root, files, config_file) != before:
         raise _reject("inputs_changed_during_verification")
     report = PreflightReport(
         evidence_kind=evidence_kind,
@@ -705,6 +751,7 @@ def _verify_inputs(
         series["IWM"],
         frozen,
         files,
+        config_file,
         before,
     )
 
@@ -714,7 +761,8 @@ def _recheck(root: Path, verified: _Verified, attestation: RuntimeAttestation, f
     if (
         _collect_runtime_attestation() != attestation
         or _require_runtime_unchanged() != fp
-        or _snapshot(root.resolve(strict=True), verified.files) != verified.snapshot
+        or _snapshot(root.resolve(strict=True), verified.files, verified.config_file)
+        != verified.snapshot
     ):
         raise _reject("runtime_or_inputs_changed_during_evaluation")
 
@@ -815,12 +863,14 @@ def _prepare_destination(root: Path, report: PreflightReport) -> None:
     base = Path(OUTPUT_ROOTS[report.evidence_kind])
     probe = base / f"{NAMESPACES[report.evidence_kind]}{'0' * 64}"
     marker = base / EXECUTIONS_DIRECTORY / f"{_execution_key(report)}.json"
-    _check_existing_chain(root, (*base.parts, EXECUTIONS_DIRECTORY))
+    chain = (*base.parts, EXECUTIONS_DIRECTORY)
+    _check_existing_chain(root, chain)
+    # Empty owner-only directories are created first so Git can judge the real directory.
+    os.close(_open_directory_chain(root, chain, create=True))
+    _require_ignored_directory(root, base)  # whole output tree, before authorization is consumed
     _require_ignored_untracked(
         root, [marker, *(probe / name for name in _ARTIFACT_NAMES)], tree=base
     )
-    descriptor = _open_directory_chain(root, (*base.parts, EXECUTIONS_DIRECTORY), create=True)
-    os.close(descriptor)
 
 
 def _reserve_execution(root: Path, report: PreflightReport, auth: ExperimentAuthorization) -> None:
@@ -844,6 +894,8 @@ def _reserve_execution(root: Path, report: PreflightReport, auth: ExperimentAuth
             _write_exclusive(directory, f"{_execution_key(report)}.json", marker)
         except FileExistsError:
             raise _reject("execution_already_consumed_or_interrupted") from None
+        # The marker's name must survive a crash before any fitting begins.
+        _fsync_directory(directory)
     finally:
         os.close(directory)
 
@@ -964,6 +1016,7 @@ def _publish(root: Path, evidence_kind: str, experiment_id: str, files: dict[str
             os.mkdir(experiment_id, 0o700, dir_fd=parent)  # exclusive: fails if anything exists
         except FileExistsError:
             raise _reject("output_already_exists_no_overwrite") from None
+        _fsync_directory(parent)
         directory = os.open(
             experiment_id, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
         )
@@ -986,6 +1039,7 @@ def _publish(root: Path, evidence_kind: str, experiment_id: str, files: dict[str
                     }
                 ),
             )  # written last: completion marker
+            _fsync_directory(directory)
         finally:
             os.close(directory)
     finally:

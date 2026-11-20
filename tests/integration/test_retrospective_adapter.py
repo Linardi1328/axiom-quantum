@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -522,18 +523,23 @@ def test_runtime_identity_is_bound_to_the_report_and_baselined_at_import(
 def test_dependency_or_source_drift_after_verification_is_detected(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = study._closure
-    calls: list[int] = []
+    real_closure, real_verify = study._closure, adapter._verify_inputs
+    state = {"verified": False}
+
+    def verify(**kwargs: Any) -> Any:
+        result = real_verify(**kwargs)
+        state["verified"] = True  # drift starts only once every input has been verified
+        return result
 
     def drifting(roots: tuple[str, ...]) -> Any:
-        calls.append(1)
-        checksums, versions = real(roots)
-        # first two calls are the baseline and the entry check; later ones simulate drift
-        return (checksums, {**versions, "scikit-learn": "0.0.0"} if len(calls) > 2 else versions)
+        checksums, versions = real_closure(roots)
+        return (checksums, {**versions, "scikit-learn": "0.0.0"} if state["verified"] else versions)
 
+    monkeypatch.setattr(adapter, "_verify_inputs", verify)
     monkeypatch.setattr(study, "_closure", drifting)
     with pytest.raises(adapter.AdapterError, match="source_or_dependencies_changed_since_import"):
         _preflight(sandbox)
+    assert state["verified"] is True  # the rejection came from the post-verification recheck
 
 
 # ---------------------------------------------------------------------------
@@ -615,13 +621,17 @@ def test_changes_during_evaluation_are_detected_before_anything_is_written(
     clean = clone(box, box.root.parent / "third")
     target = _canonical_path(box, "QQQ")
 
+    evaluated: list[int] = []
+
     def mutate(**_k: object) -> study.RetrospectiveStudyResult:
+        evaluated.append(1)
         target.write_bytes(target.read_bytes() + b" ")
         return ran.result
 
     monkeypatch.setattr(study, "_evaluate_retrospective_study", mutate)
     with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
         _run(box, auth)
+    assert evaluated == [1]  # the change happened during, and was caught after, the fit
     assert not [
         p for p in (box.root / "artifacts/research/phase3cr_synthetic").iterdir()
         if p.name.startswith("aq-p3cr")
@@ -633,10 +643,17 @@ def test_changes_during_evaluation_are_detected_before_anything_is_written(
         calls.append(1)
         return ATTESTED if len(calls) == 1 else adapter.RuntimeAttestation(True, COMMIT, False)
 
-    monkeypatch.setattr(study, "_evaluate_retrospective_study", lambda **_k: ran.result)
+    prefit: list[int] = []
+
+    def never_fit(**_k: object) -> study.RetrospectiveStudyResult:
+        prefit.append(1)
+        return ran.result
+
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", never_fit)
     monkeypatch.setattr(adapter, "_collect_runtime_attestation", flaky)
     with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
         _run(clean, write_authorization(clean.root, report.digest))
+    assert prefit == []  # the checkout changed before the fit: nothing was fitted
 
 
 # ---------------------------------------------------------------------------
@@ -750,7 +767,8 @@ def test_output_destination_must_be_ignored_and_untracked(
     auth = write_authorization(box.root, report.digest)
     with pytest.raises(adapter.AdapterError, match="ignored_and_untracked"):
         _run(box, auth)
-    assert not (box.root / "artifacts/research/phase3cr_synthetic").exists()
+    output = box.root / "artifacts/research/phase3cr_synthetic"
+    assert not [p for p in output.rglob("*") if p.is_file()]  # no marker, nothing published
 
 
 def test_real_namespace_is_unreachable_from_synthetic_inputs(ran: Ran) -> None:
@@ -1160,6 +1178,7 @@ def test_mutating_any_consumed_artifact_during_evaluation_is_detected(
     monkeypatch.setattr(study, "_evaluate_retrospective_study", mutate)
     with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
         _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 1  # reached the evaluator; the change was caught afterwards
     assert not [
         p for p in (box.root / "artifacts/research/phase3cr_synthetic").iterdir()
         if p.name.startswith("aq-p3cr")
@@ -1202,9 +1221,17 @@ def test_real_isolated_processes_end_to_end(tmp_path: Path) -> None:
     )
     assert built.returncode == 0, built.stderr[-2000:]
     spec = json.loads(built.stdout.strip().splitlines()[-1])
-    commit = subprocess.run(
-        ["git", "-C", str(code), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    from unit.retrospective_adapter_helpers import git_env
+
+    head = subprocess.run(
+        ["git", "-C", str(code), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=git_env(),
+    )
+    assert head.returncode == 0
+    commit = head.stdout.strip()
 
     def invoke(
         mode: str, *, isolated: bool = True, pin: str = commit, auth: str = ""
@@ -1286,3 +1313,229 @@ def _code_checkout(destination: Path) -> Path:
     subprocess.run([*git, "add", "-A"], check=True, env=environment)
     subprocess.run([*git, "commit", "-q", "-m", "snapshot"], check=True, env=environment)
     return destination
+
+
+# ---------------------------------------------------------------------------
+# PR #102 final remediation: directory ignore, durability, config, git probes
+# ---------------------------------------------------------------------------
+
+
+def _make_repo(path: Path, name: str = "a.txt") -> Path:
+    from unit.retrospective_adapter_helpers import git_env
+
+    path.mkdir(parents=True)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(path)]
+    subprocess.run([*git, "init", "-q"], check=True, env=git_env())
+    (path / name).write_text(name)
+    subprocess.run([*git, "add", name], check=True, env=git_env())
+    subprocess.run([*git, "commit", "-q", "-m", "x"], check=True, env=git_env())
+    return path
+
+
+def _head(path: Path) -> str:
+    from unit.retrospective_adapter_helpers import git_env
+
+    done = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=git_env(),
+    )
+    assert done.returncode == 0
+    return done.stdout.strip()
+
+
+def test_git_probes_ignore_inherited_repository_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = _make_repo(tmp_path / "target", "target.txt")
+    other = _make_repo(tmp_path / "other", "other.txt")
+    (other / "dirty.txt").write_text("untracked")  # would make `other` look dirty
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(other / ".git" / "index"))
+    attestation = _real_collect()(target)
+    assert attestation.git_commit == _head(target)
+    assert attestation.git_commit != _head(other)
+    assert attestation.clean is True
+    assert adapter._git(["rev-parse", "--show-toplevel"], target).stdout.strip() == str(
+        target.resolve()
+    )
+
+
+def test_configured_fsmonitor_hook_is_never_executed(tmp_path: Path) -> None:
+    from unit.retrospective_adapter_helpers import git_env
+
+    repo = _make_repo(tmp_path / "repo")
+    proof = tmp_path / "hook-ran"
+    hook = tmp_path / "hook.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {proof}\n")
+    hook.chmod(0o755)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.fsmonitor", str(hook)],
+        check=True,
+        env=git_env(),
+    )
+    # control: plain git status executes the configured hook, so the probe below is meaningful
+    subprocess.run(["git", "-C", str(repo), "status"], capture_output=True, env=git_env())
+    assert proof.exists()
+    proof.unlink()
+    attestation = _real_collect()(repo)
+    assert attestation.clean is True
+    assert not proof.exists()
+
+
+def test_a_git_index_error_is_not_treated_as_untracked(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    auth = write_authorization(box.root, report.digest)
+    (box.root / ".git" / "index").write_bytes(b"not a git index")
+    listing = adapter._git(["ls-files", "--", ".local/authorization.json"], box.root)
+    assert listing.returncode != 0  # precondition: the index really is unreadable
+    with pytest.raises(adapter.AdapterError, match="path_must_be_ignored_and_untracked"):
+        _run(box, auth)
+    assert counting.calls == 0
+
+
+def test_whole_output_directory_must_be_ignored_before_authorization_is_consumed(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    (box.root / ".gitignore").write_text(
+        "data/raw/*\ndata/canonical/*\ndata/manifests/*\n.local/\n"
+        "artifacts/research/*\n!artifacts/research/phase3cr_synthetic/\n"
+        "artifacts/research/phase3cr_synthetic/*\n"
+    )  # every file under the directory is ignored, but the directory itself is not
+    with pytest.raises(adapter.AdapterError, match="ignored_and_untracked"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+    executions = box.root / "artifacts/research/phase3cr_synthetic/executions"
+    assert not list(executions.iterdir())  # no marker: nothing was consumed
+
+
+def test_marker_directory_sync_failure_stops_before_fitting(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter._prepare_destination(box.root, report)  # ancestors already exist and are synced
+    real = os.fsync
+
+    def failing(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("simulated sync failure")
+        real(descriptor)
+
+    with monkeypatch.context() as sync_patch:
+        sync_patch.setattr(os, "fsync", failing)
+        with pytest.raises(adapter.AdapterError, match="durability_not_established"):
+            _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+    with pytest.raises(adapter.AdapterError, match="execution_already_consumed_or_interrupted"):
+        _run(box, write_authorization(box.root, report.digest))  # fail closed, no retry
+    assert counting.calls == 0
+
+
+def test_marker_and_ancestor_entries_are_synced_before_the_evaluator_runs(
+    box: Sandbox, report: adapter.PreflightReport, ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    real = os.fsync
+
+    def recording(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            events.append("sync-directory")
+        real(descriptor)
+
+    def evaluate(**_k: object) -> study.RetrospectiveStudyResult:
+        events.append("evaluate")
+        return ran.result
+
+    monkeypatch.setattr(os, "fsync", recording)
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", evaluate)
+    _run(box, write_authorization(box.root, report.digest))
+    first = events.index("evaluate")
+    # new ancestors (artifacts/research/<root>, executions) plus the marker directory
+    assert events[:first].count("sync-directory") >= 2
+    assert events[first - 1] == "sync-directory"  # the marker directory sync is last pre-fit
+
+
+def test_new_ancestor_entries_are_synced_and_failure_is_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    synced: list[int] = []
+    real = os.fsync
+
+    def recording(descriptor: int) -> None:
+        synced.append(descriptor)
+        real(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording)
+    os.close(adapter._open_directory_chain(root, ("a", "b", "c"), create=True))
+    assert len(synced) == 3  # one parent sync per newly created entry
+    synced.clear()
+    os.close(adapter._open_directory_chain(root, ("a", "b", "c"), create=True))
+    assert synced == []  # nothing new was created, nothing to sync
+    monkeypatch.setattr(os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("sync")))
+    with pytest.raises(adapter.AdapterError, match="durability_not_established"):
+        adapter._open_directory_chain(root, ("x",), create=True)
+
+
+def test_real_input_cannot_override_the_phase3b_configuration(sandbox: Sandbox) -> None:
+    with pytest.raises(adapter.AdapterError, match="config_override_not_permitted_for_real_input"):
+        _preflight(sandbox, _fixture_parent=None, phase3b_config_path=ROOT / "anything.json")
+
+
+def test_fixture_config_override_is_part_of_the_snapshot_and_rechecked(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    default = ROOT / adapter.DEFAULT_PHASE3B_CONFIG
+    override = tmp_path / "phase3b_override.json"
+    override.write_bytes(default.read_bytes())
+    same = _preflight(box, phase3b_config_path=override)
+    assert same.input_snapshot_sha256 == report.input_snapshot_sha256
+    override.write_text(default.read_text().replace("{", "{ ", 1))  # same JSON, different bytes
+    changed = _preflight(box, phase3b_config_path=override)
+    assert changed.input_snapshot_sha256 != report.input_snapshot_sha256
+    assert changed.digest != report.digest
+
+    def mutate(**_k: object) -> study.RetrospectiveStudyResult:
+        counting.calls += 1
+        override.write_text(override.read_text() + "\n")
+        return counting.result
+
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", mutate)
+    auth = write_authorization(box.root, changed.digest)
+    with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
+        _run(box, auth, phase3b_config_path=override)
+    assert counting.calls == 1
+
+
+def test_checkout_change_after_the_fit_is_detected_and_nothing_is_published(
+    box: Sandbox, report: adapter.PreflightReport, ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = {"dirty": False}
+    evaluated: list[int] = []
+
+    def attest(*_a: object, **_k: object) -> adapter.RuntimeAttestation:
+        return adapter.RuntimeAttestation(True, COMMIT, not state["dirty"])
+
+    def evaluate(**_k: object) -> study.RetrospectiveStudyResult:
+        evaluated.append(1)
+        state["dirty"] = True  # the checkout becomes dirty only after the fit has run
+        return ran.result
+
+    monkeypatch.setattr(adapter, "_collect_runtime_attestation", attest)
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", evaluate)
+    with pytest.raises(adapter.AdapterError, match="runtime_or_inputs_changed_during_evaluation"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert evaluated == [1]
+    output = box.root / "artifacts/research/phase3cr_synthetic"
+    assert not [p for p in output.iterdir() if p.name.startswith("aq-p3cr")]
