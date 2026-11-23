@@ -171,7 +171,11 @@ document.
   tolerance is used. It is **undefined** when `n = 0` or `G ≤ 1` (gross return not
   positive); undefined is reported with that reason and never replaced by 0 or by a bound.
   The break-even cost is a **descriptive diagnostic, not a decisive criterion**, and is
-  computed per fold for the candidate and every benchmark alike. Cost sensitivity never
+  computed per fold for the candidate and every benchmark that invests full equity per
+  trade (policy `P-A` and benchmarks B-0…B-3). It is **not defined for `P-B`**: sleeves
+  invest only part of equity in each trade, so the product of trade multiples is not the
+  equity multiple and the closed form does not apply; for `P-B` only the cost-sensitivity
+  table is reported. Cost sensitivity never
   changes the primary cost assumption.
 
 ## 6. Benchmarks
@@ -212,7 +216,7 @@ adjusted-price-index-hypothetical label of §5.
 | Exposure fraction | share of sessions with a position at session end | E |
 | Turnover ratio | total reference notional / mean equity | E |
 | Commissions, slippage cost, total transaction cost | sums over fills | E |
-| Cost burden | `total_transaction_cost / initial_cash` and cost in bps of execution notional | E (omitted when the denominator is undefined, per the evidence spec) |
+| Cost burden | `total_transaction_cost / initial_cash` (`transaction_cost_fraction_initial_cash`; the **decisive measure** for `EXCESSIVE_COST_BURDEN`, §8.2) and, descriptively only, cost in bps of execution notional (which is fixed by the cost convention per round trip and so uninformative at frozen costs) | E (omitted when the denominator is undefined, per the evidence spec) |
 | Order and fill counts, fill rate | proposed/approved/rejected/filled; fill rate when proposed > 0 | E |
 | Gross (pre-cost) return and cost drag | gross return and net − gross | N |
 | Completed round trips; `ignored_in_position` signals (and under `P-B` `unfunded` / `partially_funded` signals) | counts | N |
@@ -266,7 +270,7 @@ benchmark or comparator result).
 | No completed round trips in any valid fold | Overall outcome `NO_TRADES`; economic evidence not evaluable. A candidate that never signals is therefore `NO_TRADES`, not `NOT_EVALUABLE`, so precedence does not depend on how undefined ratio metrics are treated. |
 | Pooled completed round trips across valid folds below `N_min` `[OWNER-LOCK]` D4 (no default; any per-fold minimum is part of the same lock) | Overall outcome `INSUFFICIENT_TRADES`; per-trade and tail statistics reported as undefined. |
 | Cost-negated: gross return > 0 but net return ≤ 0 | Fold flagged `COST_NEGATED`; folds so flagged are counted. |
-| Excessive costs: cost burden above a limit `[OWNER-LOCK]` D5 | Overall outcome `EXCESSIVE_COST_BURDEN`. |
+| Excessive costs: the **median, across traded valid folds, of the per-fold `total_transaction_cost / initial_cash`** (abstained folds excluded; the maximum is also reported) exceeds the limit `[OWNER-LOCK]` D5 (the measure and aggregation are proposed here; only the limit value has no default) | Overall outcome `EXCESSIVE_COST_BURDEN`. The check is applied separately at each locked cost multiplier whose use the owner designates as decisive (D5); at the frozen costs otherwise. |
 | Unacceptable risk: maximum drawdown or tail metric beyond limits `[OWNER-LOCK]` D7 (relative to B-0 / B-1 and/or absolute) | Overall outcome `UNACCEPTABLE_RISK`. |
 
 **8.3 Outcome labels.** Exactly one is assigned by evaluating, in order: `NOT_EVALUABLE`,
@@ -335,7 +339,7 @@ scope.
 | D2 | Signal rule | Long if probability > `τ`, one threshold shared by the candidate, all fitted comparators and B-2; proposed `τ = 0.5` (the frozen descriptive threshold); no tuning |
 | D3 | Primary portfolio policy and event ordering | `P-A` single position, in-position signals rejected (P-3), the session event order of P-7, 100% index-unit allocation; `P-B` sleeves (funding `min(equity/5, cash)`, `unfunded`/`partially_funded`) as optional labelled sensitivity |
 | D4 | `N_min` minimum completed round trips | `[OWNER-LOCK]` — no default |
-| D5 | Cost-sensitivity multipliers and excessive-cost limit; break-even cost as descriptive-only closed form (§5) | Multipliers and limit `[OWNER-LOCK]` — no default; closed-form break-even is not a decision criterion |
+| D5 | Cost-sensitivity multipliers; excessive-cost measure, aggregation and limit; break-even cost as descriptive-only closed form for `P-A`/benchmarks (§5) | Measure = per-fold `total_transaction_cost / initial_cash`, aggregated by the median over traded valid folds (proposed lock); multipliers, which multipliers are decisive, and the limit value `[OWNER-LOCK]` — no default; closed-form break-even is not a decision criterion and is undefined for `P-B` |
 | D6 | Benchmark comparison margins and fold-count rule; required fold metrics and abstained-fold treatment (§8.2); designation of the AUC-selected B-3 comparator (§6); whether to add an exposure-matched benchmark | Margins and counts `[OWNER-LOCK]` — no default; benchmark set B-0…B-3 as in §6; abstained folds valid; five-fold minimum reused; B-3 selected only from the classification screen, never from economic results |
 | D7 | Drawdown and tail-risk limits (absolute and relative) | `[OWNER-LOCK]` — no default |
 | D8 | Annualization convention and risk-free assumption for risk-adjusted ratios | `[OWNER-LOCK]` — no default |
