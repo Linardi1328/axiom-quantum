@@ -467,7 +467,11 @@ def test_real_attestation_detects_dirty_untracked_and_head(tmp_path: Path) -> No
         [*git, "-C", str(tmp_path), "commit", "-q", "-m", "x"], check=True, env=environment
     )
     head = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=environment,
     ).stdout.strip()
     collect = _real_collect()
     clean = collect(tmp_path)
@@ -1651,8 +1655,8 @@ def test_ambient_git_environment_is_rejected_before_any_verification(
     assert counting.calls == 0
     assert loaded == []
     assert attestations == []  # rejected before any runtime probe or delegated verifier
-    adapter._PROCESS.update(preflight=False, run=False)
-    assert adapter._PROCESS == {"preflight": False, "run": False}  # the process claim is intact
+    # State left by the rejected entry point itself: it never consumed its process claim.
+    assert adapter._PROCESS == {"preflight": False, "run": False}
 
 
 def test_the_clean_environment_requirement_is_documented() -> None:
