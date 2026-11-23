@@ -93,25 +93,30 @@ every model and to the model-based benchmarks.
 
 | # | Rule |
 |---|---|
-| P-1 | **Signal.** At the close of prediction session `t`, a model emits a probability; the signal is *long* if `probability > 0.5`, otherwise *cash*. This reuses the frozen descriptive 0.5 threshold. No threshold search, calibration or tuning is permitted. (`[OWNER-LOCK]` D2: confirm the use of 0.5, or lock a different single value *before* the run.) |
+| P-1 | **Signal.** At the close of prediction session `t`, a model emits a probability; the signal is *long* if `probability > τ`, otherwise *cash*, where `τ` is one single signal threshold shared by the candidate, every fitted comparator and benchmark B-2. The proposed value is `τ = 0.5`, the frozen descriptive threshold. No threshold search, calibration or tuning is permitted. (`[OWNER-LOCK]` D2: confirm `τ = 0.5`, or lock a different single value *before* the run; whatever is locked applies to all models and B-2 identically.) |
 | P-2 | **Instrument and direction.** SPY only; long or cash; no shorting, leverage, derivatives, other assets or margin. |
-| P-3 | **One position at a time.** A long signal funds a position only if the account is flat when the entry order would be sent. While a position is open, new long signals are **ignored** (no pyramiding, no concurrent positions, no early exit, no signal-based exit). Signals ignored for this reason are counted and reported. |
+| P-3 | **One position at a time; in-position signals are rejected.** A long signal made at the close of session `t` is *eligible* only if, at that close, the account is flat **and** no entry is pending. Every signal made while a position is open (including a position that will exit at the next open) or while an entry is pending is **rejected** and counted as `ignored_in_position`: no queueing, no deferred or same-open re-entry, no pyramiding, no concurrent positions, no early exit and no signal-based exit. The decision uses only information through the close of `t`; no later price is used to decide eligibility. |
 | P-4 | **Holding period.** Enter at the open of `t+1`; exit at the open of `t+6` (the frozen label horizon, five sessions held). By the frozen fold construction (strict exit chronology and label-exit purge) every such exit for an assessed prediction lies inside that fold's `assessment_last_exit` window. |
-| P-5 | **Capital.** Each fold starts flat with the fixed hypothetical starting cash `10,000` (the existing `INITIAL_SIMULATED_CASH`). No capital carries across folds and there is no compounding across folds. |
-| P-6 | **Sizing.** All available cash is used: whole shares only, `floor(cash / effective entry price)` where the effective entry price includes the frozen per-side cost, matching the existing engine's affordability rule. No fractional shares. Unspent cash earns 0% (no interest assumption). If fewer than one share is affordable the signal is *unfunded* and is reported as such. |
-| P-7 | **Cash availability.** Exit proceeds are available only after the exit fill. If a position exits at the open of session `s`, a long signal made at the close of `s−1` may enter at the same open, but only after the exit has filled and only with the cash then available; there is no use of unsettled or future proceeds and no borrowing. |
+| P-5 | **Accounting unit and capital.** Results are an **adjusted-price-index hypothetical** (§5): each fold starts flat with `10,000` *index units* (a scale chosen so the existing `INITIAL_SIMULATED_CASH` metric definitions apply unchanged; the unit is not US dollars). No capital carries across folds; no compounding across folds. |
+| P-6 | **Sizing.** When a position is open, 100% of fold equity is invested in SPY *index units* (no share counts, no whole-share rounding, no affordability test, no leverage). Because the cost-adjusted entry and exit prices of the frozen label convention are used, the equity multiple of a trade equals `(1 + net_forward_return)`. Idle equity earns 0%. A whole-share dollar variant is **not** proposed because adjusted prices are not executable share prices (§5). |
+| P-7 | **Event ordering within a session** (deterministic and testable). (1) At the **open** of session `s`: fill any exit scheduled for `s`, then fill any entry scheduled for `s`. (2) At the **close** of `s`: mark equity, then evaluate the signal made at this close under P-3. A position exiting at the open of `s` was therefore still open at the close of `s−1`, so a long signal made at that close is rejected; the earliest eligible signal after an exit is made at the close of `s`, and its entry is at the open of `s+1`. Consequences: successive entries are at least six sessions apart, each position is held exactly five sessions, and a fold has at most `⌈126/6⌉ = 21` round trips. No cash is borrowed and no future open price is used. |
 | P-8 | **Exposure limit.** At most one hypothetical position of at most 100% of fold equity; maximum concurrent positions = 1. |
 
 Rationale: P-3 matches the Version 1 single-position rule and avoids the serial
 dependence and cash-conflict ambiguity of overlapping five-session windows, at the price
-of ignoring many signals and producing few trades per fold (at most one round trip per
-five sessions, so at most 25 in a 126-prediction fold, and normally far fewer). The study
-has no requirement to use more than one position.
+of rejecting many signals and producing few trades per fold. The study has no
+requirement to use more than one position. Index-unit accounting (P-5, P-6) keeps the
+frozen label arithmetic and removes whole-share affordability artifacts that adjusted
+prices cannot support.
 
 **Alternative `P-B` (diagnostic only; owner decision D3).** Five equal "sleeves": each
-long signal is funded with one fifth of fold equity, up to five concurrent overlapping
-positions, no leverage. This uses every signal and mirrors the daily-signal structure of
-the label but creates five-fold overlapping returns, higher turnover and correlated
+eligible long signal is funded with `min(fold_equity / 5, available_cash)`, up to five
+concurrent overlapping positions, no leverage. If `available_cash` is zero the signal is
+`unfunded`; if it is positive but below one fifth of fold equity (for example because
+open positions have appreciated) the signal is funded with the remaining cash only and
+counted as `partially_funded`. Under `P-B` the in-position rejection of P-3 applies only
+when five sleeves are already open or no cash remains. This uses most signals and mirrors the daily-signal structure of
+the label but creates overlapping returns, higher turnover and correlated
 positions. If included, it is reported **only** as a labelled sensitivity next to `P-A`,
 never selected after the fact, and requires a second owner-reviewed implementation.
 `P-A` is the proposed *primary* policy.
@@ -126,9 +131,21 @@ document.
   `1 - side_cost_rate`, where `side_cost_rate = (0.125 + 0.25) / 10,000`, exactly as in
   `datasets/labels.py`. Gross return is `exit_open / entry_open - 1`; net return uses the
   cost-adjusted prices. Round-trip cost is therefore twice the per-side rate.
-- **Series.** The parent SPY series with `adjustment=all` (split- and dividend-adjusted),
-  one consistently adjusted series for features, labels and economics; never a mix of raw
-  and adjusted fields. Hypothetical results are denominated in adjusted prices.
+- **Series and evidentiary status: adjusted-price-index hypothetical.** The parent SPY
+  series with `adjustment=all` is split- and dividend-adjusted, retrospectively, and
+  is one consistently adjusted series for features, labels and economics (never a mix of
+  raw and adjusted fields). Adjusted historical prices are **not executable quoted share
+  prices**, and dividends are embedded in them rather than appearing as cash flows.
+  Therefore every economic result under this proposal is an **adjusted-price-index
+  hypothetical** and must carry that label. It does not support any claim about realistic
+  dollar profit and loss, whole-share affordability, dividend income, historical exposure
+  in dollars or tax treatment, and it has a lower evidentiary status than a result built on
+  verified execution prices. Dollar-style interpretation would require a separately
+  entitled and independently verified unadjusted execution-price series with dividend and
+  split cash flows; that is **not** proposed, is not acquired here, and would need its own
+  owner decision, rights review and approved protocol (D10). The frozen label and cost
+  convention is **not changed**: per-trade net return stays
+  `(exit_open × (1 − c)) / (entry_open × (1 + c)) − 1` on the frozen series.
 - **Turnover.** Reported with the existing `turnover_ratio` definition (total reference
   notional divided by mean equity), per fold, together with the number of completed round
   trips.
@@ -144,15 +161,24 @@ document.
 - **Cost sensitivity (required reporting).** Because the frozen costs are an
   assumption, each economic metric is also reported with the per-side cost scaled by a
   set of multipliers `[OWNER-LOCK]` D5 (the multiplier set; no default is proposed), and a
-  parameter-free **break-even per-side cost** (the per-side cost at which the policy's net
-  return for the fold equals zero; undefined if the gross return is not positive). Cost
-  sensitivity is a diagnostic only and never changes the primary cost assumption.
+  deterministic **break-even per-side cost**. Under index-unit accounting (P-5, P-6) the
+  set of trades does not depend on cost: signals come from model probabilities, and
+  eligibility from P-3 depends only on position state, not on cost. For a fold with
+  `n ≥ 1` completed trades and gross equity multiple `G = Π(exit_open_i / entry_open_i)`,
+  the net multiple at per-side cost `c` is `G · ((1 − c)/(1 + c))^n`, which is strictly
+  decreasing in `c`, so the cost at which it equals 1 is **unique and closed-form**:
+  with `r = G^(−1/n)`, `c* = (1 − r)/(1 + r)` (reported in bps). No search, optimizer or
+  tolerance is used. It is **undefined** when `n = 0` or `G ≤ 1` (gross return not
+  positive); undefined is reported with that reason and never replaced by 0 or by a bound.
+  The break-even cost is a **descriptive diagnostic, not a decisive criterion**, and is
+  computed per fold for the candidate and every benchmark alike. Cost sensitivity never
+  changes the primary cost assumption.
 
 ## 6. Benchmarks
 
 All benchmarks are fixed here, before any evaluation. For each fold they use **the same
-window, the same starting cash, the same whole-share rule, the same frozen costs and the
-same equity-marking convention** as the candidate. The window of a fold is from the open
+window, the same starting index units, the same index-unit accounting (P-5, P-6), the
+same frozen costs and the same equity-marking convention** as the candidate. The window of a fold is from the open
 of the entry session of its first assessed prediction to the open of its
 `assessment_last_exit` session.
 
@@ -160,8 +186,8 @@ of the entry session of its first assessed prediction to the open of its
 |---|---|---|
 | B-0 | **No position** | Cash only: return 0, exposure 0, no costs. The abstention baseline. |
 | B-1 | **Buy-and-hold SPY** | Buy at the window's first open, sell at its last open; one round trip; same costs. |
-| B-2 | **Training-prevalence policy** | The frozen training-prevalence model's constant probability fed through the same `P-1`…`P-8` rules: always long if the training prevalence exceeds 0.5 (re-entering after each exit), otherwise always cash. This is the economic counterpart of the frozen prevalence control. |
-| B-3 | **SPY-only fitted comparators** | The three fitted comparators of the frozen five-model design (`logistic_regression_research_00`, `logistic_regression`, `gradient_boosting`) under the identical policy and identical prediction rows, so the candidate is compared with the strongest SPY-only comparator, as in `aq-p3cr-criteria-v1`. |
+| B-2 | **Training-prevalence policy** | The frozen training-prevalence model's constant probability fed through the same `P-1`…`P-8` rules with the **same signal threshold `τ` as P-1 and the candidate** (proposed 0.5, locked once under D2): long (re-entering whenever P-3 allows) if the fold's training prevalence exceeds `τ`, otherwise always cash. It never uses a separate hard-coded threshold. This is the economic counterpart of the frozen prevalence control. |
+| B-3 | **SPY-only fitted comparators** | The three fitted comparators of the frozen five-model design (`logistic_regression_research_00`, `logistic_regression`, `gradient_boosting`) under the identical policy and identical prediction rows. The **decisive comparator is the AUC-selected one** defined by `aq-p3cr-criteria-v1` item 3: the fitted comparator with the highest *median AUC* among those three (ties resolved by registry order; training prevalence excluded). It is read from the classification screen of the same single fit and **designated before any economic metric is computed**; it is never chosen, changed or re-ranked using economic results, and the same comparator is used for every fold. The other two are reported descriptively only. The candidate and the designated comparator are paired on the same fold, the same rows and the same window. |
 
 Candidate-versus-benchmark comparisons are **paired by fold** and reported as per-fold
 differences and fold counts, with no significance claim. An exposure-matched or
@@ -174,7 +200,10 @@ it and locks its construction first.
 Status key: **E** = definition exists in `BacktestMetrics` / `canonical_backtest_evidence`
 (`research/backtest_evidence.py`, `docs/AQ_PHASE_01_SLICE_03_BACKTEST_EVIDENCE_SPEC.md`)
 and should be reused unchanged; **N** = requires additional implementation (not authorized
-here); **X** = cannot be established from the available data.
+here); **X** = cannot be established from the available data. All dollar-denominated
+fields of the existing definitions (`initial_cash`, `final_equity`, notionals, costs) are
+read as **index units** under P-5/P-6, so every value below carries the
+adjusted-price-index-hypothetical label of §5.
 
 | Metric | Definition | Status |
 |---|---|---|
@@ -186,14 +215,14 @@ here); **X** = cannot be established from the available data.
 | Cost burden | `total_transaction_cost / initial_cash` and cost in bps of execution notional | E (omitted when the denominator is undefined, per the evidence spec) |
 | Order and fill counts, fill rate | proposed/approved/rejected/filled; fill rate when proposed > 0 | E |
 | Gross (pre-cost) return and cost drag | gross return and net − gross | N |
-| Completed round trips; ignored and unfunded signals | counts | N |
+| Completed round trips; `ignored_in_position` signals (and under `P-B` `unfunded` / `partially_funded` signals) | counts | N |
 | Per-trade net return distribution | mean, median, best, worst; hit rate | N |
 | Daily-return volatility and downside deviation | from daily equity marks | N |
 | Risk-adjusted return | return divided by volatility (Sharpe-like) and by downside deviation (Sortino-like) with a stated annualization convention and risk-free assumption (`[OWNER-LOCK]` D8); return divided by maximum drawdown | N (undefined when the denominator is zero) |
 | Drawdown duration and time under water | sessions below the prior peak | N |
 | Tail diagnostics | worst single trade, worst five-session loss, longest losing streak; expected shortfall of trade returns at a quantile `[OWNER-LOCK]` D9, only if the trade count is sufficient | N |
 | Per-fold dispersion | minimum / median / maximum of each metric across folds; number of folds with net return above each benchmark | N |
-| Break-even per-side cost and cost-sensitivity table | see §5 | N |
+| Break-even per-side cost (closed form, undefined when `n = 0` or `G ≤ 1`) and cost-sensitivity table | see §5; descriptive only | N |
 | Realized spread, market impact, fill quality, capacity, taxes, borrow | — | X |
 
 Aggregation across folds uses the **median of per-fold values and the fold range**, as the
@@ -214,22 +243,36 @@ interpretation rule (decision D1): economic results are **evidence of plausibili
 if** the classification screen returned `CRITERIA_MET`; otherwise the hypothesis is
 retired per the spec and the economic results are reported as non-decisional diagnostics.
 
-**8.2 Abstention (a per-fold and overall outcome, not an error).**
+**8.2 Fold validity and abstention (a per-fold and overall outcome, not an error).**
+
+*Required fold metrics (proposed lock, D6).* A fold is **valid** if and only if all of the
+following are defined (finite) for the candidate, B-0, B-1, B-2 and the designated B-3
+comparator: gross and net total return, maximum drawdown, exposure fraction, turnover
+ratio, total transaction cost and completed-round-trip count. These all reduce to
+well-defined values whenever the fold window has at least one session, **including an
+abstained fold** (all of them 0). Ratio-type metrics (cost burden in bps of execution
+notional, volatility- and drawdown-based ratios, break-even cost, per-trade and tail
+statistics) are **not required for validity**; they are reported as undefined with a reason
+when their denominator is zero (for example, no trades give zero volatility). An
+**abstained fold is a valid fold** and counts toward the five-fold minimum, and is also
+counted separately as abstained; it is not a traded fold. A fold is invalid only for
+structural reasons (empty or non-finite window, a missing required metric, or a missing
+benchmark or comparator result).
 
 | Condition | Deterministic handling |
 |---|---|
-| No eligible signal in a fold (no probability above the signal threshold, or every signal ignored/unfunded) | Fold economic result = abstained: net return 0, exposure 0, no trades; counted as an abstained fold. |
-| No trades in any fold | Overall outcome `NO_TRADES`; economic evidence not evaluable. |
-| Completed round trips below `N_min` `[OWNER-LOCK]` D4 (no default) | Overall outcome `INSUFFICIENT_TRADES`; per-trade and tail statistics reported as undefined. |
-| Any required metric undefined for the candidate in a decisive fold | The fold is excluded from decisive counts and listed with its reason; fewer than five valid folds (the `MIN_VALID_FOLDS` value of the frozen classification screen, proposed for reuse; owner to confirm under D6) ⇒ `NOT_EVALUABLE`. |
+| No eligible signal in a fold (no probability above `τ`, or every signal rejected, `unfunded` or `ignored_in_position`) | Fold = **abstained** and **valid**: net return 0, exposure 0, no trades; counted as an abstained fold. |
+| Fewer than five valid folds (the `MIN_VALID_FOLDS` value of the frozen classification screen, proposed for reuse; owner to confirm under D6) | Overall outcome `NOT_EVALUABLE`. This concerns fold *validity* only; abstention alone never causes it. |
+| No completed round trips in any valid fold | Overall outcome `NO_TRADES`; economic evidence not evaluable. A candidate that never signals is therefore `NO_TRADES`, not `NOT_EVALUABLE`, so precedence does not depend on how undefined ratio metrics are treated. |
+| Pooled completed round trips across valid folds below `N_min` `[OWNER-LOCK]` D4 (no default; any per-fold minimum is part of the same lock) | Overall outcome `INSUFFICIENT_TRADES`; per-trade and tail statistics reported as undefined. |
 | Cost-negated: gross return > 0 but net return ≤ 0 | Fold flagged `COST_NEGATED`; folds so flagged are counted. |
 | Excessive costs: cost burden above a limit `[OWNER-LOCK]` D5 | Overall outcome `EXCESSIVE_COST_BURDEN`. |
 | Unacceptable risk: maximum drawdown or tail metric beyond limits `[OWNER-LOCK]` D7 (relative to B-0 / B-1 and/or absolute) | Overall outcome `UNACCEPTABLE_RISK`. |
 
 **8.3 Outcome labels.** Exactly one is assigned by evaluating, in order: `NOT_EVALUABLE`,
 `NO_TRADES`, `INSUFFICIENT_TRADES`, `EXCESSIVE_COST_BURDEN`, `UNACCEPTABLE_RISK`; then, if
-none applies, the candidate is compared with B-0, B-1, B-2 and the strongest B-3
-comparator under owner-locked margins and fold-count rules `[OWNER-LOCK]` D6, giving
+none applies, the candidate is compared with B-0, B-1, B-2 and the AUC-selected B-3
+comparator (§6) under owner-locked margins and fold-count rules `[OWNER-LOCK]` D6, giving
 either `ECONOMICALLY_NOT_SUPPORTED` or `ECONOMICALLY_PLAUSIBLE_DESCRIPTIVE`. The latter
 means only that locked descriptive rules were met in a retrospective-corrected
 development population; it is **not** evidence of future performance, **not** admission,
@@ -255,8 +298,8 @@ ones.
    claim is made. The five models and several benchmarks are compared on the same data,
    so favorable comparisons may arise by chance (multiple comparisons).
 4. **Classification improvement does not establish profitability or economic value.**
-   Economic outcomes are sensitive to the policy, whole-share rounding on a small
-   hypothetical account, idle cash earning 0%, few trades and serial dependence.
+   Economic outcomes are sensitive to the policy, idle equity earning 0%, few trades and
+   serial dependence.
 5. **Hypothetical results cannot establish broker execution quality.** They use reported
    daily opens, an assumed fixed cost and no market impact or fill uncertainty (§5).
 6. **A favorable exploratory result cannot substitute for fresh, independently protected
@@ -266,6 +309,10 @@ ones.
 7. The candidate's design caveat in the retrospective spec (linearly dependent features,
    different effective regularization) applies to economic results as well: improvement
    cannot be attributed purely to incremental information.
+8. **Adjusted-price-index hypothetical.** Retrospectively adjusted prices are not
+   executable quoted share prices and carry dividends as price adjustments, so no result
+   supports a claim about dollar profit and loss, whole-share affordability, dividend
+   income or historical dollar exposure (§5, D10).
 
 ## 10. Identity and reproducibility requirements for a future implementation
 
@@ -285,15 +332,15 @@ scope.
 | ID | Decision | Draft proposal |
 |---|---|---|
 | D1 | Relationship to the classification screen | Economic results are evidence of plausibility only if `aq-p3cr-criteria-v1` = `CRITERIA_MET`; otherwise non-decisional diagnostics |
-| D2 | Signal rule | Long if probability > 0.5 (the frozen descriptive threshold); no tuning |
-| D3 | Primary portfolio policy | `P-A` single position, non-overlapping, all-in whole shares; `P-B` sleeves as optional labelled sensitivity |
+| D2 | Signal rule | Long if probability > `τ`, one threshold shared by the candidate, all fitted comparators and B-2; proposed `τ = 0.5` (the frozen descriptive threshold); no tuning |
+| D3 | Primary portfolio policy and event ordering | `P-A` single position, in-position signals rejected (P-3), the session event order of P-7, 100% index-unit allocation; `P-B` sleeves (funding `min(equity/5, cash)`, `unfunded`/`partially_funded`) as optional labelled sensitivity |
 | D4 | `N_min` minimum completed round trips | `[OWNER-LOCK]` — no default |
-| D5 | Cost-sensitivity multipliers and excessive-cost limit | `[OWNER-LOCK]` — no default |
-| D6 | Benchmark comparison margins and fold-count rule; whether to add an exposure-matched benchmark | `[OWNER-LOCK]` — no default; benchmark set B-0…B-3 as in §6 |
+| D5 | Cost-sensitivity multipliers and excessive-cost limit; break-even cost as descriptive-only closed form (§5) | Multipliers and limit `[OWNER-LOCK]` — no default; closed-form break-even is not a decision criterion |
+| D6 | Benchmark comparison margins and fold-count rule; required fold metrics and abstained-fold treatment (§8.2); designation of the AUC-selected B-3 comparator (§6); whether to add an exposure-matched benchmark | Margins and counts `[OWNER-LOCK]` — no default; benchmark set B-0…B-3 as in §6; abstained folds valid; five-fold minimum reused; B-3 selected only from the classification screen, never from economic results |
 | D7 | Drawdown and tail-risk limits (absolute and relative) | `[OWNER-LOCK]` — no default |
 | D8 | Annualization convention and risk-free assumption for risk-adjusted ratios | `[OWNER-LOCK]` — no default |
 | D9 | Tail-risk quantile and minimum sample | `[OWNER-LOCK]` — no default |
-| D10 | Starting cash, whole-share rule and 0% idle-cash assumption | Existing `INITIAL_SIMULATED_CASH` (10,000), whole shares, 0% |
+| D10 | Accounting basis and evidentiary status | Adjusted-price-index hypothetical: 10,000 index units (scale of the existing `INITIAL_SIMULATED_CASH` definitions), fractional index units, no whole-share or dollar P&L claim, 0% idle return. Moving to a dollar/whole-share interpretation would require a separately entitled, independently verified execution-price series with dividend and split cash flows, a rights review and a new owner decision; not proposed, nothing is acquired here |
 | D11 | Authorize a *separate* reviewed implementation of the economic evaluation inside the single-fit evaluator, with synthetic tests, before the real-data fit | Not authorized by this draft |
 | D12 | Approve and lock this document (SHA-256) and the `[OWNER-LOCK]` file before any real-data run | Not authorized by this draft |
 
