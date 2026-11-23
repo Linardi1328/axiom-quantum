@@ -19,10 +19,18 @@ not cryptographic authorization; the runtime fingerprint is a source/dependency-
 comparison against a baseline taken when this module was imported, not cryptographic
 loaded-code attestation. None of this defends against an adversary operating under the same
 OS account, which could rewrite any of these files or the interpreter.
+
+Requirements on the calling environment: a fresh ``python -I`` process with NO ``GIT_*``
+environment variables (they are rejected at both entry points because the existing context
+verifiers invoke git with the ambient environment). An interrupted or failed execution is
+never retried, cleaned up or staged automatically: its marker and any partial output
+directory remain and recovery is a manual, separately owner-authorized action (accepted
+limitation).
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
@@ -259,6 +267,16 @@ class _Verified:
 # ---------------------------------------------------------------------------
 
 
+def _require_clean_git_environment() -> None:
+    """Delegated verifiers (context storage/lineage) call git with the ambient environment.
+
+    They are not modified here, so the offline one-shot contract requires that no GIT_*
+    variable (repository, work tree, index, config selection) is present at all.
+    """
+    if any(name.startswith("GIT_") for name in os.environ):
+        raise _reject("ambient_git_environment_not_permitted")
+
+
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     # core.fsmonitor is forced off so a configured hook can never execute during a probe.
@@ -414,12 +432,11 @@ def _open_directory_chain(root: Path, parts: tuple[str, ...], *, create: bool) -
         _check_directory(descriptor)
         for part in parts:
             if create:
-                try:
+                with contextlib.suppress(FileExistsError):
                     os.mkdir(part, 0o700, dir_fd=descriptor)
-                except FileExistsError:
-                    pass
-                else:
-                    _fsync_directory(descriptor)  # persist the new entry in its parent
+                # Sync the parent for newly created AND reused entries: a name left behind
+                # by an earlier, failed sync is not durable merely because it exists now.
+                _fsync_directory(descriptor)
             following = os.open(part, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = following
@@ -777,6 +794,7 @@ def eligibility_preflight(
     _fixture_parent: FrozenParent | None = None,
 ) -> PreflightReport:
     """Verify everything and report identities. Never fits a model."""
+    _require_clean_git_environment()
     _claim_process("preflight")
     attestation = _collect_runtime_attestation()
     _require_runtime(attestation, pinned_commit)
@@ -1067,6 +1085,7 @@ def run_authorized_experiment(
     _fixture_parent: FrozenParent | None = None,
 ) -> ExperimentRecord:
     """Evaluate once, only under an owner authorization bound to the verified inputs."""
+    _require_clean_git_environment()
     _claim_process("run")
     root = repository_root.resolve(strict=True)
     attestation = _collect_runtime_attestation()

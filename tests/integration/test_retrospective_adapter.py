@@ -34,6 +34,12 @@ ROOT = Path(__file__).resolve().parents[2]
 ATTESTED = adapter.RuntimeAttestation(isolated=True, git_commit=COMMIT, clean=True)
 
 
+def _scrub_git_environment(patch: pytest.MonkeyPatch) -> None:
+    """The adapter requires an environment without GIT_*; tests start from a clean one."""
+    for name in [n for n in os.environ if n.startswith("GIT_")]:
+        patch.delenv(name)
+
+
 def _fresh() -> None:
     adapter._PROCESS.update(preflight=False, run=False)
 
@@ -46,6 +52,7 @@ def _attested(*_args: object, **_kwargs: object) -> adapter.RuntimeAttestation:
 def fresh_process_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """pytest is not an isolated, pinned process: attest explicitly, one process per test."""
     monkeypatch.setattr(adapter, "_collect_runtime_attestation", _attested)
+    _scrub_git_environment(monkeypatch)
     _fresh()
     yield
     _fresh()
@@ -87,6 +94,7 @@ def _run(box: Sandbox, auth: Path, **overrides: Any) -> adapter.ExperimentRecord
 def report(sandbox: Sandbox) -> adapter.PreflightReport:
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(adapter, "_collect_runtime_attestation", _attested)
+        _scrub_git_environment(mp)
         return _preflight(sandbox)
 
 
@@ -111,6 +119,7 @@ def ran(
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(adapter, "_collect_runtime_attestation", _attested)
+        _scrub_git_environment(mp)
         mp.setattr(study, "_evaluate_retrospective_study", capture)
         record = _run(box, write_authorization(box.root, report.digest))
     return Ran(box, record, captured[0])
@@ -803,7 +812,7 @@ def test_adapter_has_no_network_credential_broker_or_acquisition_dependencies() 
     assert not [m for m in imported for f in forbidden if m == f or m.startswith(f + ".")]
     for needle in ("getenv", "environ.get", "environ[", "acquire_historical", "StockHistorical"):
         assert needle not in text
-    assert text.count("os.environ") == 1  # only the git-variable scrubbing helper
+    assert text.count("os.environ") == 2  # git-variable scrubbing and the GIT_* rejection
     assert "api_key" in adapter.FORBIDDEN_OUTPUT_KEYS
 
 
@@ -1419,11 +1428,13 @@ def test_marker_directory_sync_failure_stops_before_fitting(
     counting: Counter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter._prepare_destination(box.root, report)  # ancestors already exist and are synced
+    adapter._prepare_destination(box.root, report)
+    executions = box.root / "artifacts/research/phase3cr_synthetic/executions"
+    marker_inode = executions.stat().st_ino
     real = os.fsync
 
     def failing(descriptor: int) -> None:
-        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+        if os.fstat(descriptor).st_ino == marker_inode:  # only the marker directory itself
             raise OSError("simulated sync failure")
         real(descriptor)
 
@@ -1432,8 +1443,9 @@ def test_marker_directory_sync_failure_stops_before_fitting(
         with pytest.raises(adapter.AdapterError, match="durability_not_established"):
             _run(box, write_authorization(box.root, report.digest))
     assert counting.calls == 0
+    assert len(list(executions.iterdir())) == 1  # the marker exists: consumed, fail closed
     with pytest.raises(adapter.AdapterError, match="execution_already_consumed_or_interrupted"):
-        _run(box, write_authorization(box.root, report.digest))  # fail closed, no retry
+        _run(box, write_authorization(box.root, report.digest))  # no automatic retry
     assert counting.calls == 0
 
 
@@ -1461,7 +1473,7 @@ def test_marker_and_ancestor_entries_are_synced_before_the_evaluator_runs(
     assert events[first - 1] == "sync-directory"  # the marker directory sync is last pre-fit
 
 
-def test_new_ancestor_entries_are_synced_and_failure_is_fatal(
+def test_parents_of_new_and_reused_entries_are_both_synced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "repo"
@@ -1478,10 +1490,64 @@ def test_new_ancestor_entries_are_synced_and_failure_is_fatal(
     assert len(synced) == 3  # one parent sync per newly created entry
     synced.clear()
     os.close(adapter._open_directory_chain(root, ("a", "b", "c"), create=True))
-    assert synced == []  # nothing new was created, nothing to sync
-    monkeypatch.setattr(os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("sync")))
-    with pytest.raises(adapter.AdapterError, match="durability_not_established"):
-        adapter._open_directory_chain(root, ("x",), create=True)
+    assert len(synced) == 3  # reused entries are synced too
+    synced.clear()
+    os.close(adapter._open_directory_chain(root, ("a", "b", "c"), create=False))
+    assert synced == []  # read-only walks have nothing to persist
+
+
+def test_failed_sync_then_retry_cannot_skip_durability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    real = os.fsync
+
+    def broken(_descriptor: int) -> None:
+        raise OSError("simulated sync failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", broken)
+        with pytest.raises(adapter.AdapterError, match="durability_not_established"):
+            adapter._open_directory_chain(root, ("x", "y"), create=True)
+    assert (root / "x").is_dir()  # the entry exists although its parent sync failed
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", broken)
+        with pytest.raises(adapter.AdapterError, match="durability_not_established"):
+            # the reused entry must not be trusted: the retry also fails closed
+            adapter._open_directory_chain(root, ("x", "y"), create=True)
+    synced: list[int] = []
+
+    def working(descriptor: int) -> None:
+        synced.append(descriptor)
+        real(descriptor)
+
+    monkeypatch.setattr(os, "fsync", working)
+    os.close(adapter._open_directory_chain(root, ("x", "y"), create=True))
+    assert len(synced) == 2  # only after a successful sync of every parent does it proceed
+
+
+def test_evaluation_cannot_begin_before_every_durability_step_succeeds(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter._prepare_destination(box.root, report)  # every directory now exists (reused)
+    real = os.fsync
+
+    def failing(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("simulated sync failure")
+        real(descriptor)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", failing)
+        with pytest.raises(adapter.AdapterError, match="durability_not_established"):
+            _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0  # reused entries could not be synced: nothing was fitted
+    markers = box.root / "artifacts/research/phase3cr_synthetic/executions"
+    assert list(markers.iterdir()) == []  # and no execution was consumed either
 
 
 def test_real_input_cannot_override_the_phase3b_configuration(sandbox: Sandbox) -> None:
@@ -1539,3 +1605,75 @@ def test_checkout_change_after_the_fit_is_detected_and_nothing_is_published(
     assert evaluated == [1]
     output = box.root / "artifacts/research/phase3cr_synthetic"
     assert not [p for p in output.iterdir() if p.name.startswith("aq-p3cr")]
+
+
+# ---------------------------------------------------------------------------
+# PR #102 final decisions: ambient GIT_* rejection and wrong-path manifest
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "variable", ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES"]
+)
+@pytest.mark.parametrize("entry", ["preflight", "run"])
+def test_ambient_git_environment_is_rejected_before_any_verification(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    read_log: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    entry: str,
+) -> None:
+    auth = write_authorization(box.root, report.digest)
+    loaded: list[int] = []
+    attestations: list[int] = []
+    real_load = adapter._load_authorization
+
+    def tracked_load(*args: Any, **kwargs: Any) -> Any:
+        loaded.append(1)
+        return real_load(*args, **kwargs)
+
+    def tracked_attestation(*_args: object, **_kwargs: object) -> adapter.RuntimeAttestation:
+        attestations.append(1)
+        return ATTESTED
+
+    monkeypatch.setattr(adapter, "_load_authorization", tracked_load)
+    monkeypatch.setattr(adapter, "_collect_runtime_attestation", tracked_attestation)
+    monkeypatch.setenv(variable, str(box.root / "somewhere-else"))
+
+    def invoke() -> object:
+        return _preflight(box) if entry == "preflight" else _run(box, auth)
+
+    with pytest.raises(adapter.AdapterError, match="ambient_git_environment_not_permitted"):
+        invoke()
+    assert read_log == []  # no context observation (or manifest) was opened
+    assert counting.calls == 0
+    assert loaded == []
+    assert attestations == []  # rejected before any runtime probe or delegated verifier
+    adapter._PROCESS.update(preflight=False, run=False)
+    assert adapter._PROCESS == {"preflight": False, "run": False}  # the process claim is intact
+
+
+def test_the_clean_environment_requirement_is_documented() -> None:
+    spec = (ROOT / "docs/AQ_P3C_R_RETROSPECTIVE_QQQ_IWM_SPEC.md").read_text()
+    source = (ROOT / "src/spy_market_agent/research/retrospective_adapter.py").read_text()
+    for text in (spec, source):
+        assert "GIT_*" in text
+    assert "manual" in spec
+    assert "never retried, cleaned up or staged automatically" in source
+
+
+def test_valid_manifest_at_a_wrong_but_wellformed_identity_path_is_rejected(
+    box: Sandbox, read_log: list[str]
+) -> None:
+    original = box.root / box.qqq_manifest
+    wrong = original.with_name(f"aq-ctx-v2-{'a' * 24}.manifest.json")
+    assert wrong != original
+    wrong.write_bytes(original.read_bytes())  # byte-identical, valid v2 manifest
+    relative = wrong.relative_to(box.root)
+    # structurally valid shape: the path gate passes and only the identity check can reject
+    adapter._manifest_relative(box.root, relative, "QQQ")
+    with pytest.raises(adapter.AdapterError, match="context_manifest_path_identity_mismatch"):
+        _preflight(box, qqq_manifest=relative)
+    assert read_log == [wrong.name]  # exactly one read: the manifest, never raw or canonical

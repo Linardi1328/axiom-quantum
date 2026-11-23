@@ -186,7 +186,7 @@ usable **once per process** (tracked separately): `eligibility_preflight` (never
   dependency versions and Python version. The baseline is captured **when the adapter
   module is imported**; the fingerprint is recomputed at entry, at the end of preflight,
   before and after fitting, and is bound into the report digest (so into the
-  authorization). Git probes ignore inherited `GIT_*` variables and force `core.fsmonitor=false` so no configured hook runs. This detects drift after
+  authorization). The adapter's own Git probes ignore inherited `GIT_*` variables and force `core.fsmonitor=false` so no configured hook runs. Because the existing context verifiers invoke Git with the ambient environment and are deliberately unmodified, **both entry points reject any `GIT_*` environment variable** (for example `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`) before any runtime probe, authorization read or verification: the calling environment must be a fresh `python -I` process with none set. This detects drift after
   import and version differences; it is **not** loaded-code attestation and gives no
   protection against an adversary using the same OS account, who could alter any private
   file, the interpreter or the checkout. The acquisition verifier additionally requires
@@ -201,7 +201,7 @@ usable **once per process** (tracked separately): `eligibility_preflight` (never
   exclusive private marker `<output root>/executions/<key>.json` where the key is derived
   from study, evidence class and the **input digest** (inputs only; a new authorization ID,
   commit or runtime cannot bypass it). The marker file and its directory entry (and any newly created ancestor
-  entries) are fsynced before fitting, and a sync failure stops the run without fitting. An
+  entries) are fsynced before fitting, and a sync failure stops the run without fitting; the parent directory of every created **or reused** entry is synced, so a name left behind by an earlier failed sync is never trusted. An
   existing marker, including one left by an interrupted run, is rejected: there is no automatic retry and any reset is a manual,
   separately authorized owner action.
 - **Output** (`artifacts/research/phase3cr/<id>/`; fixtures `phase3cr_synthetic/`): the
@@ -221,6 +221,8 @@ usable **once per process** (tracked separately): `eligibility_preflight` (never
 - **Evidence separation:** the only test seam supplies fixture parent identities and pins
   and switches the evidence class to `synthetic_fixture`, namespace `aq-p3cr-synth-` and
   the synthetic output root.
+
+**Accepted limitation (owner decision):** publication uses an exclusive private directory reservation; an interrupted or failed run leaves its consumed marker and any partial output directory in place and fails closed. There is no staging, automatic cleanup or automatic retry; recovery is a manual, separately owner-authorized action.
 
 Remaining prerequisites before any real run (each needs separate owner authorization):
 bounded QQQ/IWM capture at the pinned commit with rights confirmation; approval of the
