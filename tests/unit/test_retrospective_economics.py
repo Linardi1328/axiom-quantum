@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import decimal
 import hashlib
 import itertools
 import json
@@ -1083,3 +1084,46 @@ def test_new_diagnostics_are_aggregate_only_and_add_no_decision_inputs() -> None
         "paired_B3",
         "drawdown_guard_vs_B1",
     ]
+
+
+# ---------------------------------------------------------------------------
+# CodeRabbit remediation: ambient Decimal context, list typing, pinned line endings
+# ---------------------------------------------------------------------------
+
+
+def test_cost_rates_are_independent_of_the_callers_decimal_context() -> None:
+    expected = [POLICY.side_cost(m) for m in (1, 5, 20)]
+    share = POLICY.commission_share()
+    with decimal.localcontext() as context:
+        context.prec = 2
+        context.rounding = decimal.ROUND_DOWN
+        assert [POLICY.side_cost(m) for m in (1, 5, 20)] == expected
+        assert POLICY.commission_share() == share
+    assert expected == pytest.approx([0.375e-4, 1.875e-4, 7.5e-4])
+    assert share == pytest.approx(1.0 / 3.0)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda lock: lock.update(outcome_order=None),
+        lambda lock: lock.update(outcome_order=dict.fromkeys(eco.OUTCOME_ORDER, 1)),
+        lambda lock: lock["comparison_criteria"].update(paired_benchmarks=None),
+        lambda lock: lock["comparison_criteria"].update(
+            paired_benchmarks={"B0": 1, "B2": 1, "B3": 1}
+        ),
+        lambda lock: lock["comparison_criteria"].update(paired_benchmarks=("B0", "B2", "B3")[:2]),
+    ],
+)
+def test_lock_order_fields_must_be_lists_and_never_raise_type_errors(mutate: Any) -> None:
+    lock = json.loads(LOCK.read_text())
+    mutate(lock)
+    with pytest.raises(EconomicPolicyError):
+        parse_economic_policy(json.dumps(lock).encode())
+
+
+def test_pinned_policy_files_are_checked_out_with_lf_line_endings() -> None:
+    attributes = (ROOT / ".gitattributes").read_text().splitlines()
+    for relative in (eco.ECONOMIC_LOCK_RELATIVE, eco.ECONOMIC_SPEC_RELATIVE):
+        assert f"{relative} text eol=lf" in attributes
+        assert b"\r" not in (ROOT / relative).read_bytes()

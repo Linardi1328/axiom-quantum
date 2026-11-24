@@ -25,7 +25,7 @@ import math
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Final
 
@@ -108,13 +108,17 @@ class EconomicPolicy:
     lock_sha256: str
 
     def side_cost(self, multiplier: int) -> float:
-        base = (self.commission_bps_per_side + self.slippage_bps_per_side) / Decimal(10000)
-        return float(base * multiplier)
+        with localcontext() as context:  # independent of the caller's precision and rounding
+            context.prec = 60
+            base = (self.commission_bps_per_side + self.slippage_bps_per_side) / Decimal(10000)
+            return float(base * multiplier)
 
     def commission_share(self) -> float:
         """Fraction of every transaction cost that is commission (scales with the multiplier)."""
-        total = self.commission_bps_per_side + self.slippage_bps_per_side
-        return float(self.commission_bps_per_side / total) if total > 0 else 0.0
+        with localcontext() as context:
+            context.prec = 60
+            total = self.commission_bps_per_side + self.slippage_bps_per_side
+            return float(self.commission_bps_per_side / total) if total > 0 else 0.0
 
 
 _TOP_KEYS: Final = frozenset(
@@ -207,6 +211,7 @@ def parse_economic_policy(lock_bytes: bytes) -> EconomicPolicy:
         or lock["evidence_label"] != EVIDENCE_LABEL
         or lock["policy"] != "P-A"
         or lock["decisional_only_if_classification_screen"] != "CRITERIA_MET"
+        or type(lock["outcome_order"]) is not list
         or tuple(lock["outcome_order"]) != OUTCOME_ORDER
     ):
         raise _policy_fail("lock_identity_invalid")
@@ -299,7 +304,8 @@ def parse_economic_policy(lock_bytes: bytes) -> EconomicPolicy:
         ),
     )
     if (
-        tuple(comparison["paired_benchmarks"]) != ("B0", "B2", "B3")
+        type(comparison["paired_benchmarks"]) is not list
+        or tuple(comparison["paired_benchmarks"]) != ("B0", "B2", "B3")
         or comparison["median_paired_net_return_difference"] != "strictly_positive"
         or comparison["drawdown_guard"] != "candidate_median_fold_max_drawdown_not_above_B1_median"
     ):
