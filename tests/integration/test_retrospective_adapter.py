@@ -1320,6 +1320,10 @@ def _code_checkout(destination: Path) -> Path:
             )
         else:
             shutil.copy2(source, destination / name)
+    # The evaluator verifies the pinned economic specification inside its own checkout.
+    specification = "docs/AQ_P3C_R_ECONOMIC_VALIDATION_PREREGISTRATION.md"
+    (destination / "docs").mkdir()
+    shutil.copy2(ROOT / specification, destination / specification)
     environment = git_env()
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(destination)]
     subprocess.run([*git, "init", "-q"], check=True, env=environment)
