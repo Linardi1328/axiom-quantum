@@ -989,10 +989,17 @@ def _sanitized_documents(
             "dimensions": payload["dimensions"],
             "folds": folds,
             "aggregates": payload["aggregates"],
+            "economics": payload["economics"],
         },
         "findings.json": {
             **status,
             "screen": payload["screen"],
+            "economic_outcome": {
+                "outcome": payload["economics"]["outcome"],
+                "rule_outcome": payload["economics"]["rule_outcome"],
+                "decisional": payload["economics"]["decisional"],
+                "evidence_label": payload["economics"]["evidence_label"],
+            },
             **(
                 {"synthetic_notice": payload["synthetic_notice"]}
                 if "synthetic_notice" in payload

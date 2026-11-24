@@ -1,0 +1,79 @@
+{
+  "schema": "aq-p3cr-economic-policy-lock-v1",
+  "policy_id": "aq-p3cr-economic-policy-v1",
+  "status": "research_only_synthetic_implementation_lock",
+  "execution_authority": "none",
+  "disposition": "NO CANDIDATE PROMOTION",
+  "owner_approval": {
+    "issue": "RIC-152",
+    "proposal_comment": "6cd58c9c-d4ba-4342-b0d0-85fc57591d24",
+    "conditional_approval_comment": "87bc4324-ec7d-43d5-9544-660085f37af8",
+    "conditions": "successful CI, lineage compatibility review and separate real-data authorization"
+  },
+  "specification": {
+    "path": "docs/AQ_P3C_R_ECONOMIC_VALIDATION_PREREGISTRATION.md",
+    "sha256": "8c22e9fbd507a6728a172d9209802a70ef2c77253b870fa6433d4d15a459424f"
+  },
+  "classification_screen_id": "aq-p3cr-criteria-v1",
+  "evidence_label": "adjusted_price_index_hypothetical",
+  "policy": "P-A",
+  "signal_threshold": 0.5,
+  "accounting": {
+    "initial_index_units": 10000,
+    "fractional_units": true,
+    "idle_return": 0,
+    "annualization_sessions": 252,
+    "reference_return": 0
+  },
+  "costs": {
+    "commission_bps_per_side": "0.125",
+    "slippage_bps_per_side": "0.25",
+    "multipliers": [1, 5, 20],
+    "base_multiplier": 1,
+    "severe_multiplier": 20
+  },
+  "fold_validity": {
+    "required_fold_outputs": 7,
+    "abstained_fold_is_valid": true
+  },
+  "trade_minimums": {
+    "pooled_round_trips": 50,
+    "traded_folds": 5,
+    "round_trips_per_traded_fold": 5
+  },
+  "cost_criteria": {
+    "max_median_traded_fold_cost_burden": 0.005,
+    "severe_median_traded_fold_net_return": "strictly_positive"
+  },
+  "risk_criteria": {
+    "max_fold_drawdown": 0.2,
+    "worst_decile_fraction": 0.1,
+    "min_pooled_worst_decile_mean": -0.08,
+    "minimum_tail_sample": 50,
+    "applied_at_multipliers": [1, 20]
+  },
+  "comparison_criteria": {
+    "paired_benchmarks": ["B0", "B2", "B3"],
+    "median_paired_net_return_difference": "strictly_positive",
+    "min_positive_paired_folds": 5,
+    "drawdown_guard": "candidate_median_fold_max_drawdown_not_above_B1_median"
+  },
+  "outcome_order": [
+    "NOT_EVALUABLE",
+    "NO_TRADES",
+    "INSUFFICIENT_TRADES",
+    "EXCESSIVE_COST_BURDEN",
+    "UNACCEPTABLE_RISK",
+    "ECONOMICALLY_NOT_SUPPORTED",
+    "ECONOMICALLY_PLAUSIBLE_DESCRIPTIVE"
+  ],
+  "decisional_only_if_classification_screen": "CRITERIA_MET",
+  "implementation_interpretations": [
+    "traded fold = fold with at least one completed round trip",
+    "median net return and median cost burden are taken over traded folds; paired differences use all seven folds (an abstained fold has net return 0)",
+    "maximum-drawdown and worst-decile limits are applied at every multiplier in risk_criteria.applied_at_multipliers",
+    "cost-burden and severe-cost failures map to EXCESSIVE_COST_BURDEN; fold-drawdown and tail failures map to UNACCEPTABLE_RISK; paired-comparison and B1 drawdown-guard failures map to ECONOMICALLY_NOT_SUPPORTED",
+    "a structurally invalid fold output aborts the whole evaluation; a missing decisive metric or designated comparator gives NOT_EVALUABLE and can never be favorable",
+    "marks: initial index units at the open of the first entry session, close marks for every session before the last exit session, terminal mark at the open of the last exit session after the exit fill; no stitched equity across folds"
+  ]
+}
