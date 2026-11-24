@@ -43,7 +43,7 @@
   },
   "cost_criteria": {
     "max_median_traded_fold_cost_burden": 0.005,
-    "severe_median_traded_fold_net_return": "strictly_positive"
+    "severe_median_all_fold_net_return": "strictly_positive"
   },
   "risk_criteria": {
     "max_fold_drawdown": 0.2,
@@ -70,10 +70,13 @@
   "decisional_only_if_classification_screen": "CRITERIA_MET",
   "implementation_interpretations": [
     "traded fold = fold with at least one completed round trip",
-    "median net return and median cost burden are taken over traded folds; paired differences use all seven folds (an abstained fold has net return 0)",
+    "median cost burden is taken over traded folds; the decisive severe-cost (20x) median net return is taken over all seven structurally valid folds with abstained folds counted as zero (owner approval fef354a2-bfd5-466f-9931-40743159dc97); the traded-fold median is retained as a descriptive metric; paired differences use all seven folds",
     "maximum-drawdown and worst-decile limits are applied at every multiplier in risk_criteria.applied_at_multipliers",
     "cost-burden and severe-cost failures map to EXCESSIVE_COST_BURDEN; fold-drawdown and tail failures map to UNACCEPTABLE_RISK; paired-comparison and B1 drawdown-guard failures map to ECONOMICALLY_NOT_SUPPORTED",
     "a structurally invalid fold output aborts the whole evaluation; a missing decisive metric or designated comparator gives NOT_EVALUABLE and can never be favorable",
+    "per-trade statistics, worst single trade, longest losing streak (consecutive losing trades) and expected shortfall are undefined with an explicit reason when pooled completed round trips are below pooled_round_trips; expected shortfall is the mean of the worst worst_decile_fraction of pooled trade returns and is also undefined below minimum_tail_sample",
+    "worst five-session loss is the minimum compounded return over any five consecutive equity-mark intervals; time under water counts marks strictly below the running peak and drawdown duration is the longest consecutive run of such marks; volatility and downside deviation are daily and non-annualized",
+    "commission and slippage costs are the fixed commission and slippage shares of every fill cost at the evaluated multiplier; cost-negated means gross return above zero with net return at or below zero; no numerical admission threshold is attached to any diagnostic",
     "marks: initial index units at the open of the first entry session, close marks for every session before the last exit session, terminal mark at the open of the last exit session after the exit fill; no stitched equity across folds"
   ]
 }

@@ -256,6 +256,8 @@ def _report(**overrides: Any) -> adapter.PreflightReport:
         "prediction_last_session": "2024-10-07",
         "excluded_protected_source_rows": 10,
         "context": (("QQQ", "x", "y", "z"), ("IWM", "x", "y", "z")),
+        "economic_specification_sha256": eco.ECONOMIC_SPEC_SHA256,
+        "economic_policy_lock_sha256": eco.ECONOMIC_LOCK_SHA256,
     }
     values.update(overrides)
     return adapter.PreflightReport(**values)
@@ -267,6 +269,13 @@ def test_single_use_key_is_independent_of_code_revision_and_economic_policy() ->
     assert first.digest != revised.digest  # approval granularity binds commit and runtime
     assert first.input_digest == revised.input_digest
     assert adapter._execution_key(first) == adapter._execution_key(revised)
+    # The exact policy bytes are bound to the approval digest but never to the logical key.
+    other_policy = _report(
+        economic_policy_lock_sha256="7" * 64, economic_specification_sha256="8" * 64
+    )
+    assert first.digest != other_policy.digest
+    assert first.input_digest == other_policy.input_digest
+    assert adapter._execution_key(first) == adapter._execution_key(other_policy)
     source = inspect.getsource(adapter._execution_key) + inspect.getsource(
         adapter.PreflightReport.input_digest.fget  # type: ignore[attr-defined]
     )

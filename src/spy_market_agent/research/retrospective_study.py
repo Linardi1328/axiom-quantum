@@ -513,6 +513,26 @@ def _context_features(
     return frame
 
 
+def _bound_economic_policy(code_repository: Path) -> economics.EconomicPolicy:
+    """Verify the pinned specification and lock bytes and their agreement with the frozen study.
+
+    Read-only and side-effect free, so the adapter can call it before reserving the single-use
+    execution marker; any failure is a fixed-text refusal.
+    """
+    try:
+        policy = economics.load_economic_policy(code_repository)
+    except EconomicPolicyError as error:
+        raise _fail(str(error)) from None
+    if (
+        str(policy.commission_bps_per_side) != COMMISSION_BPS_PER_SIDE
+        or str(policy.slippage_bps_per_side) != SLIPPAGE_BPS_PER_SIDE
+        or policy.signal_threshold != CLASSIFICATION_THRESHOLD
+        or policy.required_fold_outputs != FOLD_COUNT
+    ):
+        raise _fail("economic_policy_conflicts_with_frozen_configuration")
+    return policy
+
+
 def _evaluate_retrospective_study(
     *,
     parent_manifest: DatasetManifest,
@@ -738,19 +758,10 @@ def _evaluate(
         "feature_columns": BASELINE_COLUMNS,
     }
     membership = tuple(_membership(fold, label_frame) for fold in folds)
-    try:
-        # Approved specification and policy-lock digests are verified and bound into the
-        # experiment identity before anything is fitted.
-        economic_policy = economics.load_economic_policy(Path(__file__).resolve().parents[3])
-    except EconomicPolicyError as error:
-        raise _fail(str(error)) from None
-    if (
-        str(economic_policy.commission_bps_per_side) != COMMISSION_BPS_PER_SIDE
-        or str(economic_policy.slippage_bps_per_side) != SLIPPAGE_BPS_PER_SIDE
-        or economic_policy.signal_threshold != CLASSIFICATION_THRESHOLD
-        or economic_policy.required_fold_outputs != FOLD_COUNT
-    ):
-        raise _fail("economic_policy_conflicts_with_frozen_configuration")
+    # Approved specification and policy-lock digests are verified and bound into the
+    # experiment identity before anything is fitted (defense in depth: the adapter has already
+    # verified the same bytes before reserving the single-use marker).
+    economic_policy = _bound_economic_policy(Path(__file__).resolve().parents[3])
     lineage = {
         "study_id": STUDY_ID,
         "eligibility_id": ELIGIBILITY_ID,

@@ -35,7 +35,7 @@ ECONOMIC_LOCK_RELATIVE: Final = "configs/research/aq_p3cr_economic_policy_lock_v
 ECONOMIC_SPEC_RELATIVE: Final = "docs/AQ_P3C_R_ECONOMIC_VALIDATION_PREREGISTRATION.md"
 # SHA-256 of the specification as squash-merged by PR #103 (a0b59bf) and of the lock file.
 ECONOMIC_SPEC_SHA256: Final = "8c22e9fbd507a6728a172d9209802a70ef2c77253b870fa6433d4d15a459424f"
-ECONOMIC_LOCK_SHA256: Final = "79d018ce8220f398deb9c2c9e7947a7f417b24d96f8e0d9394e73eb4a8721837"
+ECONOMIC_LOCK_SHA256: Final = "5c4e67c6e076f080b3040c2ef40d4ab9e04098c085d9fbdc654ec97fa0bc94aa"
 EVIDENCE_LABEL: Final = "adjusted_price_index_hypothetical"
 HOLDING_SESSIONS: Final = 5  # t+1 open to t+6 open, the frozen label horizon
 OUTCOME_ORDER: Final = (
@@ -110,6 +110,11 @@ class EconomicPolicy:
     def side_cost(self, multiplier: int) -> float:
         base = (self.commission_bps_per_side + self.slippage_bps_per_side) / Decimal(10000)
         return float(base * multiplier)
+
+    def commission_share(self) -> float:
+        """Fraction of every transaction cost that is commission (scales with the multiplier)."""
+        total = self.commission_bps_per_side + self.slippage_bps_per_side
+        return float(self.commission_bps_per_side / total) if total > 0 else 0.0
 
 
 _TOP_KEYS: Final = frozenset(
@@ -261,9 +266,9 @@ def parse_economic_policy(lock_bytes: bytes) -> EconomicPolicy:
     cost_criteria = _section(
         lock,
         "cost_criteria",
-        frozenset({"max_median_traded_fold_cost_burden", "severe_median_traded_fold_net_return"}),
+        frozenset({"max_median_traded_fold_cost_burden", "severe_median_all_fold_net_return"}),
     )
-    if cost_criteria["severe_median_traded_fold_net_return"] != "strictly_positive":
+    if cost_criteria["severe_median_all_fold_net_return"] != "strictly_positive":
         raise _policy_fail("lock_cost_criteria_invalid")
     risk = _section(
         lock,
@@ -423,6 +428,12 @@ class FoldSimulation:
     sortino_like: float | None
     return_over_max_drawdown: float | None
     break_even_per_side_bps: float | None
+    reference_notional: float
+    daily_volatility: float
+    downside_deviation: float
+    drawdown_duration_sessions: int
+    sessions_under_water: int
+    worst_five_session_return: float | None
 
 
 def p_a_trades(signals: Sequence[bool]) -> tuple[list[tuple[int, int]], int, int]:
@@ -539,9 +550,19 @@ def simulate_trades(
         raise _structural("economic_accounting_identity_violated")
     peak = marks[0]
     drawdown = 0.0
-    for mark in marks:
+    under_water = 0
+    run = 0
+    longest_run = 0
+    for index, mark in enumerate(marks):
         peak = max(peak, mark)
         drawdown = max(drawdown, 1.0 - mark / peak)
+        if index > 0 and mark < peak:
+            under_water += 1
+            run += 1
+            longest_run = max(longest_run, run)
+        else:
+            run = 0
+    five_session = [marks[k + 5] / marks[k] - 1.0 for k in range(len(marks) - 5)]
     daily = [marks[k] / marks[k - 1] - 1.0 for k in range(1, len(marks))]
     mean_daily = statistics.fmean(daily)
     volatility = statistics.stdev(daily) if len(daily) > 1 else 0.0
@@ -572,6 +593,12 @@ def simulate_trades(
         sortino_like=mean_daily / downside * scale if downside > 0.0 else None,
         return_over_max_drawdown=net_return / drawdown if drawdown > 0.0 else None,
         break_even_per_side_bps=break_even,
+        reference_notional=reference_notional,
+        daily_volatility=volatility,
+        downside_deviation=downside,
+        drawdown_duration_sessions=longest_run,
+        sessions_under_water=under_water,
+        worst_five_session_return=min(five_session) if five_session else None,
     )
 
 
@@ -597,7 +624,50 @@ def _metric(value: float | None, reason: str) -> dict[str, Any]:
     return {"value": value, "undefined_reason": None if value is not None else reason}
 
 
-def _fold_record(sim: FoldSimulation) -> dict[str, Any]:
+def _median(values: Sequence[float]) -> float | None:
+    return statistics.median(values) if values else None
+
+
+def _longest_losing_streak(returns: Sequence[float]) -> int:
+    longest = run = 0
+    for value in returns:
+        run = run + 1 if value < 0.0 else 0
+        longest = max(longest, run)
+    return longest
+
+
+def _trade_statistics(returns: Sequence[float], defined: bool) -> dict[str, Any]:
+    """Per-trade distribution and tail diagnostics; undefined below the pooled trade minimum."""
+    reason = "no_completed_round_trips" if not returns else "pooled_round_trips_below_minimum"
+    show = defined and bool(returns)
+
+    def pick(value: float | int | None) -> dict[str, Any]:
+        return _metric(float(value) if show and value is not None else None, reason)
+
+    return {
+        "count": len(returns),
+        "mean": pick(statistics.fmean(returns) if returns else None),
+        "median": pick(statistics.median(returns) if returns else None),
+        "best": pick(max(returns) if returns else None),
+        "worst": pick(min(returns) if returns else None),
+        "hit_rate": pick(sum(1 for r in returns if r > 0.0) / len(returns) if returns else None),
+        "longest_losing_streak": pick(_longest_losing_streak(returns) if returns else None),
+    }
+
+
+def _trade_statistics_defined(policy: EconomicPolicy, sims: Sequence[FoldSimulation]) -> bool:
+    return sum(s.round_trips for s in sims) >= policy.min_pooled_round_trips
+
+
+def _fold_record(
+    policy: EconomicPolicy, sim: FoldSimulation, trade_defined: bool
+) -> dict[str, Any]:
+    share = policy.commission_share()
+    notional_bps = (
+        sim.total_transaction_cost / sim.reference_notional * 10_000.0
+        if sim.reference_notional > 0.0
+        else None
+    )
     return {
         "round_trips": sim.round_trips,
         "long_signals": sim.long_signals,
@@ -605,39 +675,114 @@ def _fold_record(sim: FoldSimulation) -> dict[str, Any]:
         "abstained": sim.round_trips == 0,
         "net_return": sim.net_return,
         "gross_return": sim.gross_return,
+        "cost_drag": sim.net_return - sim.gross_return,
+        "cost_negated": sim.gross_return > 0.0 and sim.net_return <= 0.0,
         "max_drawdown": sim.max_drawdown,
+        "drawdown_duration_sessions": sim.drawdown_duration_sessions,
+        "sessions_under_water": sim.sessions_under_water,
         "exposure_fraction": sim.exposure_fraction,
         "turnover_ratio": sim.turnover_ratio,
         "total_transaction_cost": sim.total_transaction_cost,
+        "commission_cost": sim.total_transaction_cost * share,
+        "slippage_cost": sim.total_transaction_cost * (1.0 - share),
         "cost_burden_fraction": sim.cost_burden_fraction,
+        "transaction_cost_bps_of_notional": _metric(notional_bps, "no_execution_notional"),
+        "daily_volatility": sim.daily_volatility,
+        "downside_deviation": sim.downside_deviation,
+        "worst_five_session_return": _metric(sim.worst_five_session_return, "fewer_than_six_marks"),
         "sharpe_like": _metric(sim.sharpe_like, "zero_or_undefined_volatility"),
         "sortino_like": _metric(sim.sortino_like, "zero_downside_deviation"),
         "return_over_max_drawdown": _metric(sim.return_over_max_drawdown, "zero_drawdown"),
         "break_even_per_side_bps": _metric(
             sim.break_even_per_side_bps, "no_trades_or_gross_return_not_positive"
         ),
+        "trade_statistics": _trade_statistics(sim.trade_net_returns, trade_defined),
     }
 
 
-def _median(values: Sequence[float]) -> float | None:
-    return statistics.median(values) if values else None
+def _fold_records(policy: EconomicPolicy, sims: Sequence[FoldSimulation]) -> list[dict[str, Any]]:
+    defined = _trade_statistics_defined(policy, sims)
+    return [{"fold": index, **_fold_record(policy, s, defined)} for index, s in enumerate(sims)]
+
+
+_DISPERSION_FIELDS: Final = (
+    "net_return",
+    "gross_return",
+    "cost_drag",
+    "max_drawdown",
+    "drawdown_duration_sessions",
+    "sessions_under_water",
+    "exposure_fraction",
+    "turnover_ratio",
+    "round_trips",
+    "total_transaction_cost",
+    "commission_cost",
+    "slippage_cost",
+    "cost_burden_fraction",
+    "transaction_cost_bps_of_notional",
+    "daily_volatility",
+    "downside_deviation",
+    "worst_five_session_return",
+    "sharpe_like",
+    "sortino_like",
+    "return_over_max_drawdown",
+    "break_even_per_side_bps",
+)
+_TRADE_DISPERSION_FIELDS: Final = (
+    ("trade_mean_net_return", "mean"),
+    ("trade_hit_rate", "hit_rate"),
+    ("worst_trade_net_return", "worst"),
+)
+
+
+def _numeric(item: Any) -> float | None:
+    value = item["value"] if isinstance(item, dict) else item
+    return None if value is None else float(value)
+
+
+def _dispersion(values: Sequence[float | None]) -> dict[str, Any]:
+    defined = [v for v in values if v is not None]
+    return {
+        "defined_folds": len(defined),
+        "min": min(defined) if defined else None,
+        "median": statistics.median(defined) if defined else None,
+        "max": max(defined) if defined else None,
+        "undefined_reason": None if defined else "undefined_in_every_fold",
+    }
 
 
 def _worst_decile(policy: EconomicPolicy, returns: Sequence[float]) -> dict[str, Any]:
+    """Expected shortfall of pooled trade returns at the locked tail fraction (D9)."""
     sample = len(returns)
+    sufficient = sample >= policy.min_tail_sample
     count = math.ceil(policy.worst_decile_fraction * sample) if sample else 0
-    mean = statistics.fmean(sorted(returns)[:count]) if count else None
+    mean = statistics.fmean(sorted(returns)[:count]) if count and sufficient else None
     return {
+        "measure": "expected_shortfall_of_pooled_trade_returns",
+        "tail_fraction": policy.worst_decile_fraction,
         "sample": sample,
+        "minimum_sample": policy.min_tail_sample,
         "worst_count": count,
         "mean": mean,
-        "sufficient_sample": sample >= policy.min_tail_sample,
+        "sufficient_sample": sufficient,
+        "undefined_reason": None if mean is not None else "tail_sample_below_minimum",
     }
 
 
 def _aggregate(policy: EconomicPolicy, sims: Sequence[FoldSimulation]) -> dict[str, Any]:
     traded = [s for s in sims if s.round_trips > 0]
     pooled = [r for s in sims for r in s.trade_net_returns]
+    defined = _trade_statistics_defined(policy, sims)
+    records = [_fold_record(policy, s, defined) for s in sims]
+    dispersion = {
+        name: _dispersion([_numeric(record[name]) for record in records])
+        for name in _DISPERSION_FIELDS
+    }
+    for name, field in _TRADE_DISPERSION_FIELDS:
+        dispersion[name] = _dispersion(
+            [_numeric(record["trade_statistics"][field]) for record in records]
+        )
+    negated = [index for index, record in enumerate(records) if record["cost_negated"]]
     return {
         "round_trips_pooled": sum(s.round_trips for s in sims),
         "ignored_in_position_pooled": sum(s.ignored_in_position for s in sims),
@@ -647,12 +792,30 @@ def _aggregate(policy: EconomicPolicy, sims: Sequence[FoldSimulation]) -> dict[s
         ),
         "abstained_folds": len(sims) - len(traded),
         "positive_net_return_folds": sum(1 for s in sims if s.net_return > 0.0),
+        "cost_negated_folds": len(negated),
+        "cost_negated_fold_indices": negated,
         "median_net_return_all_folds": _median([s.net_return for s in sims]),
         "median_net_return_traded_folds": _median([s.net_return for s in traded]),
         "median_fold_max_drawdown": _median([s.max_drawdown for s in sims]),
         "max_fold_max_drawdown": max(s.max_drawdown for s in sims),
         "median_cost_burden_traded_folds": _median([s.cost_burden_fraction for s in traded]),
+        "max_cost_burden_traded_folds": max((s.cost_burden_fraction for s in traded), default=None),
+        "pooled_trade_statistics": _trade_statistics(pooled, defined),
         "pooled_worst_decile": _worst_decile(policy, pooled),
+        "dispersion": dispersion,
+    }
+
+
+def _paired(candidate: Sequence[FoldSimulation], other: Sequence[FoldSimulation]) -> dict[str, Any]:
+    """Per-fold candidate-minus-benchmark net-return differences (descriptive, no p-value)."""
+    differences = [c.net_return - o.net_return for c, o in zip(candidate, other, strict=True)]
+    return {
+        "differences": differences,
+        "folds_compared": len(differences),
+        "median_difference": statistics.median(differences),
+        "min_difference": min(differences),
+        "max_difference": max(differences),
+        "positive_folds": sum(1 for d in differences if d > 0.0),
     }
 
 
@@ -771,7 +934,9 @@ def evaluate_economics(
         ),
     ]
     burden = aggregate_base["median_cost_burden_traded_folds"]
-    severe_median = aggregate_severe["median_net_return_traded_folds"]
+    # Decisive severe-cost median: all seven structurally valid folds, abstained folds at zero.
+    # The traded-fold median stays in the aggregate as a descriptive metric only.
+    severe_median = aggregate_severe["median_net_return_all_folds"]
     cost_checks = [
         _check(
             "base_median_traded_fold_cost_burden",
@@ -780,7 +945,7 @@ def evaluate_economics(
             burden is not None and burden <= policy.max_median_cost_burden,
         ),
         _check(
-            "severe_median_traded_fold_net_return_positive",
+            "severe_median_all_fold_net_return_positive",
             severe_median,
             "> 0",
             severe_median is not None and severe_median > 0.0,
@@ -810,21 +975,30 @@ def evaluate_economics(
         if not tail_ok and pooled >= policy.min_pooled_round_trips:
             missing.append(f"tail_evidence_unavailable_at_{multiplier}x")
 
+    paired: dict[str, dict[str, Any]] = {}
+    for multiplier in policy.multipliers:
+        candidate_sims = sims[candidate][multiplier]
+        by_label: dict[str, Any] = {
+            "B0": _paired(candidate_sims, benchmark_sims["B0"][multiplier]),
+            "B1": _paired(candidate_sims, benchmark_sims["B1"][multiplier]),
+            "B2": _paired(candidate_sims, sims[prevalence_model][multiplier]),
+        }
+        by_label["B3"] = (
+            _paired(candidate_sims, sims[designated_comparator][multiplier])
+            if comparator_ok and designated_comparator is not None
+            else {"undefined_reason": "designated_comparator_unavailable"}
+        )
+        paired[f"{multiplier}x"] = by_label
     comparison_checks: list[dict[str, Any]] = []
     for label in policy.paired_benchmarks:
-        if label == "B0":
-            other = benchmark_sims["B0"][base]
-        else:
-            reference = prevalence_model if label == "B2" else designated_comparator
-            if reference is None or reference not in sims:
-                comparison_checks.append(
-                    _check(f"paired_{label}", None, "median > 0 and positive folds", False)
-                )
-                continue
-            other = sims[reference][base]
-        differences = [c.net_return - o.net_return for c, o in zip(cand_base, other, strict=True)]
-        median_difference = statistics.median(differences)
-        positives = sum(1 for d in differences if d > 0.0)
+        difference = paired[f"{base}x"][label]
+        if "undefined_reason" in difference:
+            comparison_checks.append(
+                _check(f"paired_{label}", None, "median > 0 and positive folds", False)
+            )
+            continue
+        median_difference = difference["median_difference"]
+        positives = difference["positive_folds"]
         comparison_checks.append(
             _check(
                 f"paired_{label}",
@@ -863,9 +1037,6 @@ def evaluate_economics(
     decisional = bool(classification_screen_met)
     outcome = rule_outcome if decisional else NON_DECISIONAL
 
-    def records(simulations: Sequence[FoldSimulation]) -> list[dict[str, Any]]:
-        return [{"fold": index, **_fold_record(sim)} for index, sim in enumerate(simulations)]
-
     return {
         "policy": policy_identity(policy),
         "evidence_label": EVIDENCE_LABEL,
@@ -880,11 +1051,12 @@ def evaluate_economics(
             f"{multiplier}x": _aggregate(policy, sims[candidate][multiplier])
             for multiplier in policy.multipliers
         },
+        "paired_benchmark_differences": paired,
         "models": {
             name: {
                 f"{multiplier}x": {
                     "aggregate": _aggregate(policy, sims[name][multiplier]),
-                    "folds": records(sims[name][multiplier]),
+                    "folds": _fold_records(policy, sims[name][multiplier]),
                 }
                 for multiplier in policy.multipliers
             }
@@ -894,7 +1066,7 @@ def evaluate_economics(
             label: {
                 f"{multiplier}x": {
                     "aggregate": _aggregate(policy, benchmark_sims[label][multiplier]),
-                    "folds": records(benchmark_sims[label][multiplier]),
+                    "folds": _fold_records(policy, benchmark_sims[label][multiplier]),
                 }
                 for multiplier in policy.multipliers
             }

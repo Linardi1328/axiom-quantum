@@ -206,7 +206,12 @@ def test_missing_or_symlinked_policy_files_are_refused(tmp_path: Path) -> None:
         lambda lock: lock["accounting"].update(idle_return=0.01),
         lambda lock: lock["comparison_criteria"].update(paired_benchmarks=["B0", "B2"]),
         lambda lock: lock["specification"].update(sha256="0" * 64),
-        lambda lock: lock["cost_criteria"].update(severe_median_traded_fold_net_return="any"),
+        lambda lock: lock["cost_criteria"].update(severe_median_all_fold_net_return="any"),
+        lambda lock: lock["cost_criteria"].update(
+            severe_median_traded_fold_net_return=lock["cost_criteria"].pop(
+                "severe_median_all_fold_net_return"
+            )
+        ),
     ],
 )
 def test_lock_parser_rejects_any_unexpected_field_type_or_value(mutate: Any) -> None:
@@ -408,7 +413,7 @@ def test_undefined_ratios_are_reported_undefined_never_zero() -> None:
     opens, closes = _flat(11)
     sim = _simulate([], opens, closes)
     assert (sim.sharpe_like, sim.sortino_like, sim.return_over_max_drawdown) == (None, None, None)
-    record = eco._fold_record(sim)
+    record = eco._fold_record(POLICY, sim, True)
     for name in (
         "sharpe_like",
         "sortino_like",
@@ -523,7 +528,7 @@ def test_severe_cost_scenario_must_leave_a_strictly_positive_median_net_return()
     thin = _inputs(build=lambda _i: _trend(0.0002, dips=False))  # ~0.1% per hold < 20x costs
     result = _evaluate(thin)
     assert result["rule_outcome"] == "EXCESSIVE_COST_BURDEN"
-    severe = _check(result, "severe_median_traded_fold_net_return_positive")
+    severe = _check(result, "severe_median_all_fold_net_return_positive")
     assert severe["observed"] < 0.0
     assert not severe["passed"]
     assert result["candidate_aggregate"]["1x"]["median_net_return_traded_folds"] > 0.0
@@ -758,3 +763,323 @@ def test_module_cannot_fit_read_data_touch_the_network_or_grant_authority() -> N
     result = _evaluate(_inputs())
     assert result["execution_authority"] == "none"
     assert result["disposition"] == "NO CANDIDATE PROMOTION"
+
+
+# ---------------------------------------------------------------------------
+# R1 — decisive severe-cost median over all seven valid folds (owner approval fef354a2)
+# ---------------------------------------------------------------------------
+
+
+def _mixed_abstention_inputs(*, positive: int, negative: int) -> list[FoldInput]:
+    """Seven folds: ``positive`` winners and ``negative`` losers trade; the rest abstain."""
+    folds = []
+    for index in range(7):
+        if index < positive:
+            opens, closes = _trend(0.002)
+            candidate = 0.9
+        elif index < positive + negative:
+            opens, closes = _flat(ROWS + 5)
+            candidate = 0.9
+        else:
+            opens, closes = _trend(0.002)
+            candidate = 0.1  # abstains: valid fold, net return exactly zero
+        probabilities = dict.fromkeys(MODELS, (0.1,) * ROWS)
+        probabilities["candidate"] = (candidate,) * ROWS
+        folds.append(FoldInput(probabilities, tuple(opens), tuple(closes)))
+    return folds
+
+
+def test_traded_median_passes_but_all_fold_median_fails_so_the_severe_rule_fails() -> None:
+    # Five traded folds (3 positive, 2 negative) plus two abstained zeros: traded median > 0,
+    # all-seven median == 0, which is not strictly positive.
+    result = _evaluate(_mixed_abstention_inputs(positive=3, negative=2))
+    severe = result["candidate_aggregate"]["20x"]
+    assert severe["abstained_folds"] == 2
+    assert severe["median_net_return_traded_folds"] > 0.0  # descriptive, retained
+    assert severe["median_net_return_all_folds"] == 0.0
+    check = _check(result, "severe_median_all_fold_net_return_positive")
+    assert check["observed"] == 0.0
+    assert check["required"] == "> 0"
+    assert check["passed"] is False
+    assert result["rule_outcome"] == "EXCESSIVE_COST_BURDEN"
+    assert _check(result, "min_pooled_round_trips")["passed"]  # trade minimums are not the cause
+
+
+def test_all_fold_median_passes_when_a_strict_majority_of_valid_folds_is_positive() -> None:
+    result = _evaluate(_mixed_abstention_inputs(positive=4, negative=1))
+    check = _check(result, "severe_median_all_fold_net_return_positive")
+    assert check["observed"] > 0.0
+    assert check["passed"] is True
+    assert result["candidate_aggregate"]["20x"]["median_net_return_all_folds"] > 0.0
+
+
+def test_base_cost_burden_remains_a_traded_fold_median() -> None:
+    result = _evaluate(_mixed_abstention_inputs(positive=3, negative=2))
+    aggregate = result["candidate_aggregate"]["1x"]
+    burden = _check(result, "base_median_traded_fold_cost_burden")
+    traded = [
+        fold["cost_burden_fraction"]
+        for fold in result["models"]["candidate"]["1x"]["folds"]
+        if not fold["abstained"]
+    ]
+    assert len(traded) == 5
+    assert burden["observed"] == pytest.approx(statistics.median(traded))
+    assert aggregate["median_cost_burden_traded_folds"] == burden["observed"]
+
+
+# ---------------------------------------------------------------------------
+# R2 — complete preregistered diagnostics (aggregate only; no new thresholds)
+# ---------------------------------------------------------------------------
+
+
+def _hand_marks(cost: float) -> list[float]:
+    """Marks of one P-A trade (0 -> 5) in a flat 11-session window with a 10% dip at session 2."""
+    entry_units = UNITS / (100.0 * (1.0 + cost))
+    held = [entry_units * 100.0 * (0.9 if k == 2 else 1.0) for k in range(5)]
+    exit_equity = entry_units * 100.0 * (1.0 - cost)
+    return [UNITS, *held, *([exit_equity] * 6), exit_equity][:12]
+
+
+def test_volatility_downside_drawdown_duration_and_tail_diagnostics_match_hand_marks() -> None:
+    opens, closes = _flat(11)
+    closes[2] = 90.0
+    cost = POLICY.side_cost(1)
+    sim = _simulate([(0, 5)], opens, closes)
+    marks = _hand_marks(cost)
+    assert len(marks) == 12
+    daily = [marks[k] / marks[k - 1] - 1.0 for k in range(1, len(marks))]
+    assert sim.daily_volatility == pytest.approx(statistics.stdev(daily), rel=1e-9)
+    assert sim.downside_deviation == pytest.approx(
+        math.sqrt(statistics.fmean(min(r, 0.0) ** 2 for r in daily)), rel=1e-9
+    )
+    # Every mark after the initial one sits below the initial peak (costs, then the dip).
+    assert sim.sessions_under_water == 11
+    assert sim.drawdown_duration_sessions == 11
+    expected_five = min(marks[k + 5] / marks[k] - 1.0 for k in range(len(marks) - 5))
+    assert sim.worst_five_session_return is not None
+    assert sim.worst_five_session_return == pytest.approx(expected_five, rel=1e-9)
+    assert sim.worst_five_session_return < 0.0
+
+
+def test_time_under_water_resets_after_a_new_peak() -> None:
+    opens, closes = _trend(0.01, rows=6, dips=False)
+    sim = _simulate([(0, 5)], opens, closes)
+    assert sim.sessions_under_water < len(opens)  # new peaks occur while the index rises
+    assert sim.drawdown_duration_sessions <= sim.sessions_under_water
+    flat_opens, flat_closes = _flat(11)
+    abstained = _simulate([], flat_opens, flat_closes)
+    assert (abstained.sessions_under_water, abstained.drawdown_duration_sessions) == (0, 0)
+
+
+def test_commission_slippage_and_notional_cost_diagnostics_are_separate_and_consistent() -> None:
+    opens, closes = _flat(11)
+    for multiplier in (1, 5, 20):
+        sim = _simulate([(0, 5)], opens, closes, multiplier)
+        record = eco._fold_record(POLICY, sim, True)
+        total = record["total_transaction_cost"]
+        assert record["commission_cost"] == pytest.approx(total / 3.0)  # 0.125 of 0.375 bps
+        assert record["slippage_cost"] == pytest.approx(total * 2.0 / 3.0)
+        assert record["commission_cost"] + record["slippage_cost"] == pytest.approx(total)
+        # Cost over execution notional equals the per-side rate in bps by construction.
+        assert record["transaction_cost_bps_of_notional"]["value"] == pytest.approx(
+            0.375 * multiplier, rel=1e-9
+        )
+    idle = eco._fold_record(POLICY, _simulate([], opens, closes), True)
+    assert idle["transaction_cost_bps_of_notional"] == {
+        "value": None,
+        "undefined_reason": "no_execution_notional",
+    }
+    assert idle["commission_cost"] == idle["slippage_cost"] == 0.0
+
+
+def test_cost_negation_is_flagged_per_fold_and_counted() -> None:
+    thin = _inputs(build=lambda _i: _trend(0.00001, dips=False))  # ~0.5 bp gross < 0.75 bp costs
+    aggregate = _evaluate(thin)["candidate_aggregate"]["1x"]
+    result = _evaluate(thin)
+    folds = result["models"]["candidate"]["1x"]["folds"]
+    assert all(f["cost_negated"] for f in folds)
+    assert all(f["gross_return"] > 0.0 >= f["net_return"] for f in folds)
+    assert aggregate["cost_negated_folds"] == 7
+    assert aggregate["cost_negated_fold_indices"] == list(range(7))
+    assert all(f["cost_drag"] == pytest.approx(f["net_return"] - f["gross_return"]) for f in folds)
+    healthy = _evaluate(_inputs())["candidate_aggregate"]["1x"]
+    assert (healthy["cost_negated_folds"], healthy["cost_negated_fold_indices"]) == (0, [])
+    abstained = _evaluate(_inputs(candidate_p=0.1))["models"]["candidate"]["1x"]["folds"]
+    assert not any(f["cost_negated"] for f in abstained)  # zero gross is not "negated"
+
+
+def test_paired_benchmark_differences_are_reported_per_fold_at_every_multiplier() -> None:
+    result = _evaluate(_mixed_abstention_inputs(positive=3, negative=2))
+    paired = result["paired_benchmark_differences"]
+    assert set(paired) == {"1x", "5x", "20x"}
+    candidate = result["models"]["candidate"]["1x"]["folds"]
+    for label, benchmark in (
+        ("B0", result["benchmarks"]["B0"]["1x"]["folds"]),
+        ("B1", result["benchmarks"]["B1"]["1x"]["folds"]),
+        ("B2", result["models"]["training_prevalence"]["1x"]["folds"]),
+        ("B3", result["models"][COMPARATOR]["1x"]["folds"]),
+    ):
+        entry = paired["1x"][label]
+        expected = [
+            c["net_return"] - b["net_return"] for c, b in zip(candidate, benchmark, strict=True)
+        ]
+        assert entry["differences"] == pytest.approx(expected)
+        assert entry["folds_compared"] == 7
+        assert entry["positive_folds"] == sum(1 for d in expected if d > 0.0)
+        assert entry["median_difference"] == pytest.approx(statistics.median(expected))
+        assert (entry["min_difference"], entry["max_difference"]) == (min(expected), max(expected))
+    assert paired["1x"]["B0"]["differences"] == pytest.approx(
+        [f["net_return"] for f in candidate]
+    )  # B-0 earns exactly zero
+    comparison = _check(result, "paired_B0")["observed"]
+    assert comparison["positive_folds"] == paired["1x"]["B0"]["positive_folds"]
+
+
+def test_missing_designated_comparator_makes_the_b3_pairing_undefined() -> None:
+    result = _evaluate(_inputs(), comparator=None)
+    assert result["paired_benchmark_differences"]["1x"]["B3"] == {
+        "undefined_reason": "designated_comparator_unavailable"
+    }
+    assert result["rule_outcome"] == "NOT_EVALUABLE"
+
+
+def test_trade_return_statistics_hit_rate_and_losing_streak() -> None:
+    returns = [0.01, -0.02, -0.01, 0.03, -0.005, -0.004, -0.003, 0.02]
+    stats = eco._trade_statistics(returns, True)
+    assert stats["count"] == 8
+    assert stats["mean"]["value"] == pytest.approx(statistics.fmean(returns))
+    assert stats["median"]["value"] == pytest.approx(statistics.median(returns))
+    assert (stats["best"]["value"], stats["worst"]["value"]) == (0.03, -0.02)
+    assert stats["hit_rate"]["value"] == pytest.approx(3 / 8)
+    assert stats["longest_losing_streak"]["value"] == 3
+
+
+def test_trade_statistics_are_undefined_with_a_reason_never_zero() -> None:
+    empty = eco._trade_statistics([], True)
+    below = eco._trade_statistics([0.01, -0.01], False)
+    for stats, reason in (
+        (empty, "no_completed_round_trips"),
+        (below, "pooled_round_trips_below_minimum"),
+    ):
+        for name in ("mean", "median", "best", "worst", "hit_rate", "longest_losing_streak"):
+            assert stats[name] == {"value": None, "undefined_reason": reason}
+    assert below["count"] == 2  # the count itself is a fact, not a statistic
+
+
+def test_per_trade_statistics_are_undefined_below_the_pooled_trade_minimum() -> None:
+    few = _evaluate(_inputs(build=None, candidate_p=0.1))  # candidate never trades
+    pooled = few["candidate_aggregate"]["1x"]["pooled_trade_statistics"]
+    assert pooled["count"] == 0
+    assert pooled["worst"]["undefined_reason"] == "no_completed_round_trips"
+    enough = _evaluate(_inputs())["candidate_aggregate"]["1x"]["pooled_trade_statistics"]
+    assert enough["count"] == 70
+    assert enough["hit_rate"]["value"] is not None
+    assert enough["worst"]["value"] is not None
+    insufficient = _evaluate(_mixed_abstention_inputs(positive=2, negative=2))
+    aggregate = insufficient["candidate_aggregate"]["1x"]
+    assert aggregate["round_trips_pooled"] < POLICY.min_pooled_round_trips
+    assert aggregate["pooled_trade_statistics"]["mean"]["undefined_reason"] == (
+        "pooled_round_trips_below_minimum"
+    )
+    for fold in insufficient["models"]["candidate"]["1x"]["folds"]:
+        if fold["round_trips"]:
+            assert fold["trade_statistics"]["worst"]["undefined_reason"] == (
+                "pooled_round_trips_below_minimum"
+            )
+
+
+def test_expected_shortfall_is_undefined_below_the_approved_minimum_sample() -> None:
+    returns = [-0.01 * (k + 1) for k in range(49)]
+    tail = eco._worst_decile(POLICY, returns)
+    assert tail["sample"] == 49
+    assert tail["minimum_sample"] == 50
+    assert tail["sufficient_sample"] is False
+    assert tail["mean"] is None
+    assert tail["undefined_reason"] == "tail_sample_below_minimum"
+    assert tail["measure"] == "expected_shortfall_of_pooled_trade_returns"
+    ok = eco._worst_decile(POLICY, [*returns, -0.5])
+    assert ok["sufficient_sample"] is True
+    assert ok["worst_count"] == 5
+    assert ok["mean"] == pytest.approx(statistics.fmean(sorted([*returns, -0.5])[:5]))
+    assert ok["undefined_reason"] is None
+
+
+def test_per_fold_dispersion_reports_min_median_max_of_every_metric() -> None:
+    result = _evaluate(_mixed_abstention_inputs(positive=3, negative=2))
+    aggregate = result["candidate_aggregate"]["1x"]
+    folds = result["models"]["candidate"]["1x"]["folds"]
+    dispersion = aggregate["dispersion"]
+    for name in ("net_return", "max_drawdown", "exposure_fraction", "turnover_ratio"):
+        values = [f[name] for f in folds]
+        assert dispersion[name]["min"] == min(values)
+        assert dispersion[name]["max"] == max(values)
+        assert dispersion[name]["median"] == pytest.approx(statistics.median(values))
+        assert dispersion[name]["defined_folds"] == 7
+    for name in (
+        "gross_return",
+        "cost_drag",
+        "drawdown_duration_sessions",
+        "sessions_under_water",
+        "round_trips",
+        "total_transaction_cost",
+        "commission_cost",
+        "slippage_cost",
+        "cost_burden_fraction",
+        "transaction_cost_bps_of_notional",
+        "daily_volatility",
+        "downside_deviation",
+        "worst_five_session_return",
+        "sharpe_like",
+        "sortino_like",
+        "return_over_max_drawdown",
+        "break_even_per_side_bps",
+        "trade_mean_net_return",
+        "trade_hit_rate",
+        "worst_trade_net_return",
+    ):
+        assert set(dispersion[name]) == {
+            "defined_folds",
+            "min",
+            "median",
+            "max",
+            "undefined_reason",
+        }
+    # Abstained folds have no execution notional, so that metric is defined for traded folds only.
+    assert dispersion["transaction_cost_bps_of_notional"]["defined_folds"] == 5
+    assert dispersion["round_trips"]["min"] == 0
+
+
+def test_dispersion_of_a_metric_undefined_in_every_fold_is_explicit() -> None:
+    result = _evaluate(_inputs(candidate_p=0.1))
+    dispersion = result["candidate_aggregate"]["1x"]["dispersion"][
+        "transaction_cost_bps_of_notional"
+    ]
+    assert dispersion == {
+        "defined_folds": 0,
+        "min": None,
+        "median": None,
+        "max": None,
+        "undefined_reason": "undefined_in_every_fold",
+    }
+
+
+def test_new_diagnostics_are_aggregate_only_and_add_no_decision_inputs() -> None:
+    first = _evaluate(_inputs())
+    second = _evaluate(_inputs())
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+    # Diagnostics never change which checks decide the outcome.
+    ids = [c["id"] for c in first["checks"]]
+    assert ids == [
+        "min_pooled_round_trips",
+        "min_traded_folds_with_trade_minimum",
+        "base_median_traded_fold_cost_burden",
+        "severe_median_all_fold_net_return_positive",
+        "fold_max_drawdown_at_1x",
+        "pooled_worst_decile_mean_at_1x",
+        "fold_max_drawdown_at_20x",
+        "pooled_worst_decile_mean_at_20x",
+        "paired_B0",
+        "paired_B2",
+        "paired_B3",
+        "drawdown_guard_vs_B1",
+    ]
