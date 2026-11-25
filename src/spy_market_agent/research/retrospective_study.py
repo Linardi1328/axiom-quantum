@@ -42,6 +42,7 @@ from spy_market_agent.intelligence.context_features import ContextFeatureKind
 from spy_market_agent.market_data.checksum import compute_market_data_checksum
 from spy_market_agent.market_data.manifest import DatasetManifest
 from spy_market_agent.market_data.models import MarketDataBatch
+from spy_market_agent.research import retrospective_economics as economics
 from spy_market_agent.research.candidates import (
     build_development_estimator,
     development_model_registry,
@@ -78,6 +79,11 @@ from spy_market_agent.research.retrospective_context import (
     DerivedContext,
     RetrospectiveContextSeries,
     RetrospectiveInputError,
+)
+from spy_market_agent.research.retrospective_economics import (
+    EconomicPolicyError,
+    EconomicStructuralError,
+    FoldInput,
 )
 
 STUDY_ID: Final = "aq-p3cr-retrospective-study-v1"
@@ -507,6 +513,26 @@ def _context_features(
     return frame
 
 
+def _bound_economic_policy(code_repository: Path) -> economics.EconomicPolicy:
+    """Verify the pinned specification and lock bytes and their agreement with the frozen study.
+
+    Read-only and side-effect free, so the adapter can call it before reserving the single-use
+    execution marker; any failure is a fixed-text refusal.
+    """
+    try:
+        policy = economics.load_economic_policy(code_repository)
+    except EconomicPolicyError as error:
+        raise _fail(str(error)) from None
+    if (
+        str(policy.commission_bps_per_side) != COMMISSION_BPS_PER_SIDE
+        or str(policy.slippage_bps_per_side) != SLIPPAGE_BPS_PER_SIDE
+        or policy.signal_threshold != CLASSIFICATION_THRESHOLD
+        or policy.required_fold_outputs != FOLD_COUNT
+    ):
+        raise _fail("economic_policy_conflicts_with_frozen_configuration")
+    return policy
+
+
 def _evaluate_retrospective_study(
     *,
     parent_manifest: DatasetManifest,
@@ -532,6 +558,56 @@ def _evaluate_retrospective_study(
         raise
     except Exception:
         raise _fail("retrospective_evaluation_failed") from None
+
+
+def _evaluate_economics(
+    policy: Any,
+    folds: Sequence[DisjointFold],
+    fold_probabilities: Sequence[Mapping[str, tuple[float, ...]]],
+    label_frame: pd.DataFrame,
+    positions: np.ndarray[Any, Any],
+    opens: np.ndarray[Any, Any],
+    closes: np.ndarray[Any, Any],
+    screen: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Economic protocol over the SAME out-of-fold probabilities; performs no fitting."""
+    cost = policy.side_cost(policy.base_multiplier)
+    inputs: list[FoldInput] = []
+    for fold, probabilities in zip(folds, fold_probabilities, strict=True):
+        rows = list(fold.assessment_rows)
+        first = positions[rows[0]]
+        # Consecutive predictions are consecutive source sessions; session j of the window is
+        # the entry session of prediction j and session j+5 its exit session.
+        if rows != list(range(rows[0], rows[0] + len(rows))) or any(
+            positions[row] != first + offset for offset, row in enumerate(rows)
+        ):
+            raise _fail("economic_assessment_rows_not_consecutive")
+        start = int(first) + ENTRY_OFFSET_SESSIONS
+        stop = int(positions[rows[-1]]) + EXIT_OFFSET_SESSIONS
+        window_opens = opens[start : stop + 1]
+        window_closes = closes[start : stop + 1]
+        if len(window_opens) != len(rows) + EXIT_OFFSET_SESSIONS - ENTRY_OFFSET_SESSIONS:
+            raise _fail("economic_window_misaligned")
+        net = label_frame.iloc[rows]["net_forward_return"].to_numpy(dtype="float64")
+        expected = (window_opens[EXIT_OFFSET_SESSIONS - ENTRY_OFFSET_SESSIONS :] * (1.0 - cost)) / (
+            window_opens[: len(rows)] * (1.0 + cost)
+        ) - 1.0
+        if not np.allclose(net, expected, rtol=0.0, atol=1e-12):
+            raise _fail("economic_label_price_misalignment")
+        inputs.append(FoldInput(probabilities, tuple(window_opens), tuple(window_closes)))
+    comparator = screen["strongest_fitted_comparator"]
+    try:
+        return economics.evaluate_economics(
+            policy,
+            inputs,
+            models=MODEL_NAMES,
+            candidate=CANDIDATE,
+            prevalence_model="training_prevalence",
+            designated_comparator=comparator,
+            classification_screen_met=screen["exploratory_screen"] == "CRITERIA_MET",
+        )
+    except EconomicStructuralError as error:
+        raise _fail(str(error)) from None
 
 
 def _evaluate(
@@ -682,6 +758,10 @@ def _evaluate(
         "feature_columns": BASELINE_COLUMNS,
     }
     membership = tuple(_membership(fold, label_frame) for fold in folds)
+    # Approved specification and policy-lock digests are verified and bound into the
+    # experiment identity before anything is fitted (defense in depth: the adapter has already
+    # verified the same bytes before reserving the single-use marker).
+    economic_policy = _bound_economic_policy(Path(__file__).resolve().parents[3])
     lineage = {
         "study_id": STUDY_ID,
         "eligibility_id": ELIGIBILITY_ID,
@@ -713,6 +793,7 @@ def _evaluate(
         "label_schema": LABEL_SCHEMA_VERSION,
         "models": definitions,
         "fold_membership": membership,
+        "economic_policy": economics.policy_identity(economic_policy),
         "runtime": _runtime_lineage(),
     }
     namespace = SYNTHETIC_NAMESPACE if synthetic else RETROSPECTIVE_NAMESPACE
@@ -720,11 +801,13 @@ def _evaluate(
 
     fold_scores: list[dict[str, ClassificationMetricSet]] = []
     fold_reports: list[dict[str, Any]] = []
+    fold_probabilities: list[dict[str, tuple[float, ...]]] = []  # in memory only, never persisted
     for fold in folds:
         training_y = label_frame.iloc[list(fold.training_rows)]["target"].copy()
         assessment_y = tuple(int(v) for v in label_frame.iloc[list(fold.assessment_rows)]["target"])
         prevalence = float(training_y.mean())
         scores: dict[str, ClassificationMetricSet] = {}
+        probabilities_by_model: dict[str, tuple[float, ...]] = {}
         for name in MODEL_NAMES:
             if name == "training_prevalence":
                 probabilities: Sequence[float] = (prevalence,) * len(assessment_y)
@@ -746,7 +829,9 @@ def _evaluate(
             scores[name] = _score(
                 name, f"retro-fold-{fold.index}", assessment_y, probabilities, prevalence
             )
+            probabilities_by_model[name] = tuple(float(value) for value in probabilities)
         fold_scores.append(scores)
+        fold_probabilities.append(probabilities_by_model)
         fold_reports.append(
             {
                 "membership": membership[fold.index],
@@ -754,6 +839,17 @@ def _evaluate(
                 "candidate_minus_control": _differences(scores),
             }
         )
+    screen = evaluate_screen(fold_scores)
+    economic_result = _evaluate_economics(
+        economic_policy,
+        folds,
+        fold_probabilities,
+        label_frame,
+        positions,
+        sliced.data["open"].to_numpy(dtype="float64"),
+        spy_closes,
+        screen,
+    )
     payload: dict[str, Any] = {
         "experiment_id": experiment_id,
         "lineage": lineage,
@@ -762,7 +858,7 @@ def _evaluate(
         "usage_rights_status": "UNVERIFIED",
         "execution_authority": "none",
         "disposition": "NO CANDIDATE PROMOTION",
-        "limitations": LIMITATIONS,
+        "limitations": f"{LIMITATIONS} {economics.ECONOMIC_LIMITATIONS}",
         "dimensions": {
             "source_rows": len(source_sessions),
             "excluded_protected_source_rows": boundary.excluded_source_session_count,
@@ -774,7 +870,8 @@ def _evaluate(
         },
         "folds": fold_reports,
         "aggregates": _summarize(fold_scores),
-        "screen": evaluate_screen(fold_scores),
+        "screen": screen,
+        "economics": economic_result,
     }
     if synthetic:
         payload["synthetic_notice"] = (

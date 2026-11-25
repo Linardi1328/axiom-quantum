@@ -8,6 +8,10 @@ Two entry points, each usable at most once per process:
   file bound to the exact report digest, commit and destination, atomically consumes a
   single-use execution marker, evaluates once and persists sanitized, immutable output.
 
+Before the single-use marker can be reserved, both entry points verify the exact bytes of the
+approved economic specification and policy lock (read-only; digests are bound to the approval
+report but not to the logical single-use key) and re-check them immediately before reserving.
+
 Nothing here acquires data, reads credentials, contacts a network or broker, or writes
 outside the approved ignored output root. Existing verification (``verify_context_artifacts``,
 ``_verify_parent_campaign``, ``_load_verified_research_market_data``, the Phase 2 isolation
@@ -181,6 +185,10 @@ class PreflightReport:
     prediction_last_session: str
     excluded_protected_source_rows: int
     context: tuple[tuple[str, str, str, str], ...]  # symbol, dataset, canonical, manifest sha
+    # Exact bytes of the approved economic specification and policy lock. They are part of the
+    # approval digest but deliberately NOT of ``input_digest`` (the logical single-use key).
+    economic_specification_sha256: str
+    economic_policy_lock_sha256: str
     fit_performed: bool = False
     execution_authority: str = "none"
     disposition: str = "NO CANDIDATE PROMOTION"
@@ -625,6 +633,28 @@ def _snapshot(root: Path, files: tuple[Path, ...], config_file: Path) -> dict[st
     return result
 
 
+def _verify_economic_policy() -> tuple[str, str]:
+    """Read-only exact-byte verification of the approved economic specification and lock.
+
+    Runs during preflight and BEFORE the single-use marker is reserved; the evaluator repeats
+    the same verification as defense in depth. Returns (specification, lock) SHA-256 digests.
+    """
+    try:
+        policy = study._bound_economic_policy(_code_repository())
+    except study.RetrospectiveStudyError as error:
+        raise _reject(str(error)) from None
+    return policy.specification_sha256, policy.lock_sha256
+
+
+def _require_policy_unchanged(report: PreflightReport) -> None:
+    """The bytes verified at preflight must still be the bytes the report was approved for."""
+    if _verify_economic_policy() != (
+        report.economic_specification_sha256,
+        report.economic_policy_lock_sha256,
+    ):
+        raise _reject("economic_policy_changed_after_verification")
+
+
 def _verify_inputs(
     *,
     root: Path,
@@ -649,6 +679,7 @@ def _verify_inputs(
     ):
         raise _reject("fixture_parent_must_differ_from_accepted_parent")
     evidence_kind = "retrospective_corrected" if fixture_parent is None else "synthetic_fixture"
+    specification_sha256, policy_lock_sha256 = _verify_economic_policy()  # before any read
     root = root.resolve(strict=True)
     store = ContextStore(root)
     gate = _metadata_gate(store, qqq_manifest, iwm_manifest)  # BEFORE any observation read
@@ -758,6 +789,8 @@ def _verify_inputs(
             (s, series[s].dataset_id, series[s].canonical_sha256, series[s].manifest_sha256)
             for s in ("QQQ", "IWM")
         ),
+        economic_specification_sha256=specification_sha256,
+        economic_policy_lock_sha256=policy_lock_sha256,
     )
     return _Verified(
         report,
@@ -782,6 +815,7 @@ def _recheck(root: Path, verified: _Verified, attestation: RuntimeAttestation, f
         != verified.snapshot
     ):
         raise _reject("runtime_or_inputs_changed_during_evaluation")
+    _require_policy_unchanged(verified.report)
 
 
 def eligibility_preflight(
@@ -989,10 +1023,17 @@ def _sanitized_documents(
             "dimensions": payload["dimensions"],
             "folds": folds,
             "aggregates": payload["aggregates"],
+            "economics": payload["economics"],
         },
         "findings.json": {
             **status,
             "screen": payload["screen"],
+            "economic_outcome": {
+                "outcome": payload["economics"]["outcome"],
+                "rule_outcome": payload["economics"]["rule_outcome"],
+                "decisional": payload["economics"]["decisional"],
+                "evidence_label": payload["economics"]["evidence_label"],
+            },
             **(
                 {"synthetic_notice": payload["synthetic_notice"]}
                 if "synthetic_notice" in payload
@@ -1117,6 +1158,7 @@ def run_authorized_experiment(
     )
     _recheck(root, verified, attestation, fingerprint)
     _prepare_destination(root, verified.report)  # destination valid BEFORE any fitting
+    _require_policy_unchanged(verified.report)  # last read-only check before consuming the marker
     _reserve_execution(root, verified.report, auth)  # atomic single use; no retry on failure
     result = study._evaluate_retrospective_study(
         parent_manifest=verified.manifest,

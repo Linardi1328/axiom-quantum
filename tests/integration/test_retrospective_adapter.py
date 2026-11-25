@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from spy_market_agent.research import retrospective_adapter as adapter
+from spy_market_agent.research import retrospective_economics as eco
 from spy_market_agent.research import retrospective_study as study
 from unit.retrospective_adapter_helpers import (
     COMMIT,
@@ -1320,6 +1321,10 @@ def _code_checkout(destination: Path) -> Path:
             )
         else:
             shutil.copy2(source, destination / name)
+    # The evaluator verifies the pinned economic specification inside its own checkout.
+    specification = "docs/AQ_P3C_R_ECONOMIC_VALIDATION_PREREGISTRATION.md"
+    (destination / "docs").mkdir()
+    shutil.copy2(ROOT / specification, destination / specification)
     environment = git_env()
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(destination)]
     subprocess.run([*git, "init", "-q"], check=True, env=environment)
@@ -1681,3 +1686,180 @@ def test_valid_manifest_at_a_wrong_but_wellformed_identity_path_is_rejected(
     with pytest.raises(adapter.AdapterError, match="context_manifest_path_identity_mismatch"):
         _preflight(box, qqq_manifest=relative)
     assert read_log == [wrong.name]  # exactly one read: the manifest, never raw or canonical
+
+
+# ---------------------------------------------------------------------------
+# Exact economic specification / policy-lock verification before the marker (RIC-152 R3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def policy_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A private copy of the pinned policy inputs standing in for the code checkout."""
+    repo = tmp_path / "code"
+    for relative in (
+        eco.ECONOMIC_LOCK_RELATIVE,
+        eco.ECONOMIC_SPEC_RELATIVE,
+        adapter.DEFAULT_PHASE3B_CONFIG,
+    ):
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    monkeypatch.setattr(adapter, "_code_repository", lambda: repo)
+    return repo
+
+
+def _markers(box: Sandbox) -> list[Path]:
+    executions = box.root / adapter.OUTPUT_ROOTS["synthetic_fixture"] / adapter.EXECUTIONS_DIRECTORY
+    return sorted(executions.glob("*.json")) if executions.exists() else []
+
+
+def _altered(report: adapter.PreflightReport, field: str) -> adapter.PreflightReport:
+    changes: dict[str, Any] = {field: "0" * 64}
+    return replace(report, **changes)
+
+
+def _missing(repo: Path, relative: str) -> None:
+    (repo / relative).unlink()
+
+
+def _append(repo: Path, relative: str) -> None:
+    with (repo / relative).open("ab") as handle:
+        handle.write(b"\n")
+
+
+def _symlinked(repo: Path, relative: str) -> None:
+    link = repo / relative
+    real = link.with_name("real-copy")
+    link.rename(real)
+    link.symlink_to(real)
+
+
+POLICY_TAMPERING = [
+    pytest.param(_missing, eco.ECONOMIC_SPEC_RELATIVE, "economic_specification_digest_mismatch"),
+    pytest.param(_missing, eco.ECONOMIC_LOCK_RELATIVE, "economic_lock_digest_mismatch"),
+    pytest.param(_append, eco.ECONOMIC_SPEC_RELATIVE, "economic_specification_digest_mismatch"),
+    pytest.param(_append, eco.ECONOMIC_LOCK_RELATIVE, "economic_lock_digest_mismatch"),
+    pytest.param(_symlinked, eco.ECONOMIC_SPEC_RELATIVE, "economic_specification_digest_mismatch"),
+    pytest.param(_symlinked, eco.ECONOMIC_LOCK_RELATIVE, "economic_lock_digest_mismatch"),
+]
+
+
+def test_report_binds_the_exact_policy_bytes_but_not_the_single_use_key(
+    report: adapter.PreflightReport,
+) -> None:
+    assert report.economic_specification_sha256 == eco.ECONOMIC_SPEC_SHA256
+    assert report.economic_policy_lock_sha256 == eco.ECONOMIC_LOCK_SHA256
+    other = replace(report, economic_policy_lock_sha256="0" * 64)
+    assert other.digest != report.digest  # the approval digest changes with the policy bytes
+    assert other.input_digest == report.input_digest  # the logical single-use scope does not
+    assert adapter._execution_key(other) == adapter._execution_key(report)
+
+
+@pytest.mark.parametrize(("tamper", "relative", "code"), POLICY_TAMPERING)
+def test_invalid_policy_inputs_are_refused_at_preflight(
+    box: Sandbox, policy_repo: Path, tamper: Any, relative: str, code: str
+) -> None:
+    tamper(policy_repo, relative)
+    with pytest.raises(adapter.AdapterError, match=code):
+        _preflight(box)
+
+
+@pytest.mark.parametrize(("tamper", "relative", "code"), POLICY_TAMPERING)
+def test_invalid_policy_inputs_are_refused_before_the_marker_is_reserved(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    policy_repo: Path,
+    tamper: Any,
+    relative: str,
+    code: str,
+) -> None:
+    tamper(policy_repo, relative)
+    with pytest.raises(adapter.AdapterError, match=code):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+    assert _markers(box) == []  # the single execution attempt was not consumed
+
+
+@pytest.mark.parametrize("hook", ["_recheck", "_prepare_destination"])
+def test_policy_modified_after_verification_is_refused_before_the_marker(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    counting: Counter,
+    policy_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook: str,
+) -> None:
+    real = getattr(adapter, hook)
+
+    def tamper_around(*args: Any, **kwargs: Any) -> Any:
+        if hook == "_recheck":
+            _append(policy_repo, eco.ECONOMIC_LOCK_RELATIVE)
+        result = real(*args, **kwargs)
+        if hook == "_prepare_destination":
+            _append(policy_repo, eco.ECONOMIC_LOCK_RELATIVE)
+        return result
+
+    monkeypatch.setattr(adapter, hook, tamper_around)
+    with pytest.raises(adapter.AdapterError, match="economic_lock_digest_mismatch"):
+        _run(box, write_authorization(box.root, report.digest))
+    assert counting.calls == 0
+    assert _markers(box) == []
+
+
+def test_a_report_for_different_policy_bytes_is_not_accepted(
+    report: adapter.PreflightReport,
+) -> None:
+    adapter._require_policy_unchanged(report)  # the pinned bytes match the approved report
+    for field in ("economic_specification_sha256", "economic_policy_lock_sha256"):
+        with pytest.raises(
+            adapter.AdapterError, match="economic_policy_changed_after_verification"
+        ):
+            adapter._require_policy_unchanged(_altered(report, field))
+
+
+def test_authorization_is_bound_to_the_policy_bytes(
+    box: Sandbox, report: adapter.PreflightReport, counting: Counter
+) -> None:
+    for field in ("economic_specification_sha256", "economic_policy_lock_sha256"):
+        stale = _altered(report, field).digest
+        with pytest.raises(adapter.AdapterError, match="authorization_does_not_match"):
+            _run(box, write_authorization(box.root, stale))
+    assert counting.calls == 0
+    assert _markers(box) == []
+
+
+def test_policy_modified_during_evaluation_publishes_nothing_and_never_resets_the_marker(
+    box: Sandbox,
+    report: adapter.PreflightReport,
+    ran: Ran,
+    policy_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def tamper_then_return(**_kwargs: object) -> study.RetrospectiveStudyResult:
+        _append(policy_repo, eco.ECONOMIC_LOCK_RELATIVE)
+        return ran.result
+
+    monkeypatch.setattr(study, "_evaluate_retrospective_study", tamper_then_return)
+    with pytest.raises(adapter.AdapterError, match="economic_lock_digest_mismatch"):
+        _run(box, write_authorization(box.root, report.digest))
+    destination = box.root / adapter.OUTPUT_ROOTS["synthetic_fixture"]
+    assert list(destination.glob("aq-p3cr-synth-*")) == []  # nothing published
+    assert len(_markers(box)) == 1  # the consumed attempt remains; no automatic reset
+    # Restoring the file does not re-open the single use: there is no automatic retry.
+    shutil.copy2(ROOT / eco.ECONOMIC_LOCK_RELATIVE, policy_repo / eco.ECONOMIC_LOCK_RELATIVE)
+    with pytest.raises(adapter.AdapterError, match="execution_already_consumed_or_interrupted"):
+        _run(
+            box,
+            write_authorization(box.root, report.digest, authorization_id="second-attempt-0002"),
+        )
+    assert len(_markers(box)) == 1
+
+
+def test_persisted_lineage_records_the_verified_policy_bytes(ran: Ran) -> None:
+    lineage = json.loads((ran.record.output_directory / "lineage.json").read_text())["lineage"]
+    recorded = lineage["adapter"]["preflight_report"]
+    assert recorded["economic_specification_sha256"] == eco.ECONOMIC_SPEC_SHA256
+    assert recorded["economic_policy_lock_sha256"] == eco.ECONOMIC_LOCK_SHA256
+    assert lineage["economic_policy"]["lock_sha256"] == eco.ECONOMIC_LOCK_SHA256
