@@ -25,7 +25,8 @@ import math
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Final
 
@@ -35,7 +36,7 @@ ECONOMIC_LOCK_RELATIVE: Final = "configs/research/aq_p3cr_economic_policy_lock_v
 ECONOMIC_SPEC_RELATIVE: Final = "docs/AQ_P3C_R_ECONOMIC_VALIDATION_PREREGISTRATION.md"
 # SHA-256 of the specification as squash-merged by PR #103 (a0b59bf) and of the lock file.
 ECONOMIC_SPEC_SHA256: Final = "8c22e9fbd507a6728a172d9209802a70ef2c77253b870fa6433d4d15a459424f"
-ECONOMIC_LOCK_SHA256: Final = "5c4e67c6e076f080b3040c2ef40d4ab9e04098c085d9fbdc654ec97fa0bc94aa"
+ECONOMIC_LOCK_SHA256: Final = "ea475d24726694fd01d48ebead766fbb66d7888d7603003541da3f3155295458"
 EVIDENCE_LABEL: Final = "adjusted_price_index_hypothetical"
 HOLDING_SESSIONS: Final = 5  # t+1 open to t+6 open, the frozen label horizon
 OUTCOME_ORDER: Final = (
@@ -107,18 +108,19 @@ class EconomicPolicy:
     specification_sha256: str
     lock_sha256: str
 
+    def side_cost_exact(self, multiplier: int) -> Fraction:
+        """Exact per-side cost rate. ``Fraction(Decimal)`` is exact and performs no Decimal
+        arithmetic, so ambient Decimal precision, rounding and traps cannot affect it."""
+        bps = Fraction(self.commission_bps_per_side) + Fraction(self.slippage_bps_per_side)
+        return bps / 10000 * multiplier
+
     def side_cost(self, multiplier: int) -> float:
-        with localcontext() as context:  # independent of the caller's precision and rounding
-            context.prec = 60
-            base = (self.commission_bps_per_side + self.slippage_bps_per_side) / Decimal(10000)
-            return float(base * multiplier)
+        return float(self.side_cost_exact(multiplier))  # correctly rounded rational division
 
     def commission_share(self) -> float:
         """Fraction of every transaction cost that is commission (scales with the multiplier)."""
-        with localcontext() as context:
-            context.prec = 60
-            total = self.commission_bps_per_side + self.slippage_bps_per_side
-            return float(self.commission_bps_per_side / total) if total > 0 else 0.0
+        total = Fraction(self.commission_bps_per_side) + Fraction(self.slippage_bps_per_side)
+        return float(Fraction(self.commission_bps_per_side) / total) if total > 0 else 0.0
 
 
 _TOP_KEYS: Final = frozenset(
@@ -440,6 +442,10 @@ class FoldSimulation:
     drawdown_duration_sessions: int
     sessions_under_water: int
     worst_five_session_return: float | None
+    execution_notional: float
+    # Exact rational multiples (canonical for sign and tie decisions; see simulate_trades).
+    exact_net_multiple: Fraction
+    exact_gross_multiple: Fraction
 
 
 def p_a_trades(signals: Sequence[bool]) -> tuple[list[tuple[int, int]], int, int]:
@@ -483,12 +489,22 @@ def simulate_trades(
     annualization_sessions: int,
     long_signals: int = 0,
     ignored_in_position: int = 0,
+    exact_side_cost: Fraction | None = None,
 ) -> FoldSimulation:
     """Fully invested index-unit accounting over one fold window (sessions ``0..L-1``).
 
     Marks: the initial units (before any fill at the first open), a close mark for each
     session ``0..L-2``, and a terminal mark at the open of session ``L-1`` after any exit
     fill. A trade enters at ``open[e] * (1 + c)`` and exits at ``open[x] * (1 - c)``.
+
+    Floating-point values are used for reported accounting. Sign and tie decisions use the
+    canonical exact rational form: every float price is an exact rational, the frozen cost rate
+    is an exact rational (``exact_side_cost``, else the exact value of ``side_cost``), and a
+    fold's net multiple is the product over trades of
+    ``(exit * (1 - c)) / (entry * (1 + c))`` (gross: ``exit / entry``). This depends only on
+    normalized price ratios, so economically identical returns at different price levels are
+    exactly equal. ``reference_notional`` is ``units * open`` per fill (turnover definition);
+    ``execution_notional`` is ``units * open * (1 +/- c)`` (the hypothetical fill value).
     """
     open_path = _finite_positive(opens, "economic_nonpositive_or_nonfinite_price")
     close_path = _finite_positive(closes, "economic_nonpositive_or_nonfinite_price")
@@ -507,7 +523,11 @@ def simulate_trades(
     cash_marks: list[float] = []
     held_sessions = 0
     reference_notional = 0.0
+    execution_notional = 0.0
     transaction_cost = 0.0
+    cost_exact = exact_side_cost if exact_side_cost is not None else Fraction(side_cost)
+    exact_net = Fraction(1)
+    exact_gross = Fraction(1)
     gross_multiple = 1.0
     net_multiples: list[float] = []
     cursor = 0
@@ -516,17 +536,22 @@ def simulate_trades(
     for session in range(length - 1):  # close marks for sessions 0..L-2
         # Open of this session: process an exit scheduled here, then an entry scheduled here.
         if current is not None and current[1] == session:
-            _, exit_, units, before = current
+            entry_, exit_, units, before = current
             equity = units * open_path[exit_] * (1.0 - side_cost)
             reference_notional += units * open_path[exit_]
+            execution_notional += units * open_path[exit_] * (1.0 - side_cost)
             transaction_cost += units * open_path[exit_] * side_cost
             net_multiples.append(equity / before)
+            ratio_ = Fraction(open_path[exit_]) / Fraction(open_path[entry_])
+            exact_gross *= ratio_
+            exact_net *= ratio_ * (1 - cost_exact) / (1 + cost_exact)
             current = None
         if current is None and cursor < len(plan) and plan[cursor][0] == session:
             entry, exit_ = plan[cursor]
             cursor += 1
             units = equity / (open_path[entry] * (1.0 + side_cost))
             reference_notional += units * open_path[entry]
+            execution_notional += units * open_path[entry] * (1.0 + side_cost)
             transaction_cost += units * open_path[entry] * side_cost
             gross_multiple *= open_path[exit_] / open_path[entry]
             current = (entry, exit_, units, equity)
@@ -539,11 +564,15 @@ def simulate_trades(
     if current is not None:
         if current[1] != length - 1:
             raise _structural("economic_trade_schedule_invalid")
-        _, exit_, units, before = current
+        entry_, exit_, units, before = current
         equity = units * open_path[exit_] * (1.0 - side_cost)
         reference_notional += units * open_path[exit_]
+        execution_notional += units * open_path[exit_] * (1.0 - side_cost)
         transaction_cost += units * open_path[exit_] * side_cost
         net_multiples.append(equity / before)
+        ratio_ = Fraction(open_path[exit_]) / Fraction(open_path[entry_])
+        exact_gross *= ratio_
+        exact_net *= ratio_ * (1 - cost_exact) / (1 + cost_exact)
         current = None
     if cursor != len(plan):
         raise _structural("economic_trade_schedule_invalid")
@@ -605,6 +634,9 @@ def simulate_trades(
         drawdown_duration_sessions=longest_run,
         sessions_under_water=under_water,
         worst_five_session_return=min(five_session) if five_session else None,
+        execution_notional=execution_notional,
+        exact_net_multiple=exact_net,
+        exact_gross_multiple=exact_gross,
     )
 
 
@@ -670,8 +702,8 @@ def _fold_record(
 ) -> dict[str, Any]:
     share = policy.commission_share()
     notional_bps = (
-        sim.total_transaction_cost / sim.reference_notional * 10_000.0
-        if sim.reference_notional > 0.0
+        sim.total_transaction_cost / sim.execution_notional * 10_000.0
+        if sim.execution_notional > 0.0
         else None
     )
     return {
@@ -682,7 +714,7 @@ def _fold_record(
         "net_return": sim.net_return,
         "gross_return": sim.gross_return,
         "cost_drag": sim.net_return - sim.gross_return,
-        "cost_negated": sim.gross_return > 0.0 and sim.net_return <= 0.0,
+        "cost_negated": sim.exact_gross_multiple > 1 and sim.exact_net_multiple <= 1,
         "max_drawdown": sim.max_drawdown,
         "drawdown_duration_sessions": sim.drawdown_duration_sessions,
         "sessions_under_water": sim.sessions_under_water,
@@ -692,7 +724,11 @@ def _fold_record(
         "commission_cost": sim.total_transaction_cost * share,
         "slippage_cost": sim.total_transaction_cost * (1.0 - share),
         "cost_burden_fraction": sim.cost_burden_fraction,
-        "transaction_cost_bps_of_notional": _metric(notional_bps, "no_execution_notional"),
+        "reference_notional": sim.reference_notional,
+        "execution_notional": sim.execution_notional,
+        "transaction_cost_bps_of_execution_notional": _metric(
+            notional_bps, "no_execution_notional"
+        ),
         "daily_volatility": sim.daily_volatility,
         "downside_deviation": sim.downside_deviation,
         "worst_five_session_return": _metric(sim.worst_five_session_return, "fewer_than_six_marks"),
@@ -725,7 +761,9 @@ _DISPERSION_FIELDS: Final = (
     "commission_cost",
     "slippage_cost",
     "cost_burden_fraction",
-    "transaction_cost_bps_of_notional",
+    "reference_notional",
+    "execution_notional",
+    "transaction_cost_bps_of_execution_notional",
     "daily_volatility",
     "downside_deviation",
     "worst_five_session_return",
@@ -797,10 +835,13 @@ def _aggregate(policy: EconomicPolicy, sims: Sequence[FoldSimulation]) -> dict[s
             1 for s in sims if s.round_trips >= policy.min_round_trips_per_traded_fold
         ),
         "abstained_folds": len(sims) - len(traded),
-        "positive_net_return_folds": sum(1 for s in sims if s.net_return > 0.0),
+        "positive_net_return_folds": sum(1 for s in sims if s.exact_net_multiple > 1),
         "cost_negated_folds": len(negated),
         "cost_negated_fold_indices": negated,
         "median_net_return_all_folds": _median([s.net_return for s in sims]),
+        "median_net_return_all_folds_sign": _sign(
+            statistics.median([s.exact_net_multiple - 1 for s in sims])
+        ),
         "median_net_return_traded_folds": _median([s.net_return for s in traded]),
         "median_fold_max_drawdown": _median([s.max_drawdown for s in sims]),
         "max_fold_max_drawdown": max(s.max_drawdown for s in sims),
@@ -812,16 +853,30 @@ def _aggregate(policy: EconomicPolicy, sims: Sequence[FoldSimulation]) -> dict[s
     }
 
 
+def _sign(value: Fraction) -> int:
+    return (value > 0) - (value < 0)
+
+
 def _paired(candidate: Sequence[FoldSimulation], other: Sequence[FoldSimulation]) -> dict[str, Any]:
-    """Per-fold candidate-minus-benchmark net-return differences (descriptive, no p-value)."""
-    differences = [c.net_return - o.net_return for c, o in zip(candidate, other, strict=True)]
+    """Per-fold candidate-minus-benchmark net-return differences (descriptive, no p-value).
+
+    Differences are exact rationals (net multiples are exact; see ``simulate_trades``); exact
+    ties are zero and only genuinely positive differences are wins. Reported values are the
+    correctly rounded floats of the exact differences; decisions use the exact sign.
+    """
+    exact = [
+        c.exact_net_multiple - o.exact_net_multiple for c, o in zip(candidate, other, strict=True)
+    ]
+    median = statistics.median(exact)
     return {
-        "differences": differences,
-        "folds_compared": len(differences),
-        "median_difference": statistics.median(differences),
-        "min_difference": min(differences),
-        "max_difference": max(differences),
-        "positive_folds": sum(1 for d in differences if d > 0.0),
+        "differences": [float(d) for d in exact],
+        "folds_compared": len(exact),
+        "median_difference": float(median),
+        "median_difference_sign": _sign(median),
+        "min_difference": float(min(exact)),
+        "max_difference": float(max(exact)),
+        "positive_folds": sum(1 for d in exact if d > 0),
+        "tied_folds": sum(1 for d in exact if d == 0),
     }
 
 
@@ -852,6 +907,7 @@ def evaluate_economics(
     benchmark_sims: dict[str, dict[int, list[FoldSimulation]]] = {"B0": {}, "B1": {}}
     for multiplier in policy.multipliers:
         cost = policy.side_cost(multiplier)
+        exact_cost = policy.side_cost_exact(multiplier)
         per_model: dict[str, list[FoldSimulation]] = {name: [] for name in models}
         zero: list[FoldSimulation] = []
         hold: list[FoldSimulation] = []
@@ -865,7 +921,10 @@ def evaluate_economics(
                 or len(fold.closes) != len(fold.opens)
             ):
                 raise _structural("economic_window_length_invalid")
-            common = {"annualization_sessions": policy.annualization_sessions}
+            common: dict[str, Any] = {
+                "annualization_sessions": policy.annualization_sessions,
+                "exact_side_cost": exact_cost,
+            }
             for name in models:
                 probabilities = fold.probabilities[name]
                 if len(probabilities) != rows:
@@ -943,6 +1002,7 @@ def evaluate_economics(
     # Decisive severe-cost median: all seven structurally valid folds, abstained folds at zero.
     # The traded-fold median stays in the aggregate as a descriptive metric only.
     severe_median = aggregate_severe["median_net_return_all_folds"]
+    severe_sign = aggregate_severe["median_net_return_all_folds_sign"]  # exact rational sign
     cost_checks = [
         _check(
             "base_median_traded_fold_cost_burden",
@@ -954,7 +1014,7 @@ def evaluate_economics(
             "severe_median_all_fold_net_return_positive",
             severe_median,
             "> 0",
-            severe_median is not None and severe_median > 0.0,
+            severe_sign > 0,
         ),
     ]
     risk_checks: list[dict[str, Any]] = []
@@ -1010,7 +1070,8 @@ def evaluate_economics(
                 f"paired_{label}",
                 {"median_difference": median_difference, "positive_folds": positives},
                 {"median": "> 0", "positive_folds": policy.min_positive_paired_folds},
-                median_difference > 0.0 and positives >= policy.min_positive_paired_folds,
+                difference["median_difference_sign"] > 0
+                and positives >= policy.min_positive_paired_folds,
             )
         )
     hold_median_drawdown = statistics.median(s.max_drawdown for s in benchmark_sims["B1"][base])

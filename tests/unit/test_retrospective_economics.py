@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import decimal
+import fractions
 import hashlib
 import itertools
 import json
@@ -882,11 +883,11 @@ def test_commission_slippage_and_notional_cost_diagnostics_are_separate_and_cons
         assert record["slippage_cost"] == pytest.approx(total * 2.0 / 3.0)
         assert record["commission_cost"] + record["slippage_cost"] == pytest.approx(total)
         # Cost over execution notional equals the per-side rate in bps by construction.
-        assert record["transaction_cost_bps_of_notional"]["value"] == pytest.approx(
+        assert record["transaction_cost_bps_of_execution_notional"]["value"] == pytest.approx(
             0.375 * multiplier, rel=1e-9
         )
     idle = eco._fold_record(POLICY, _simulate([], opens, closes), True)
-    assert idle["transaction_cost_bps_of_notional"] == {
+    assert idle["transaction_cost_bps_of_execution_notional"] == {
         "value": None,
         "undefined_reason": "no_execution_notional",
     }
@@ -928,7 +929,8 @@ def test_paired_benchmark_differences_are_reported_per_fold_at_every_multiplier(
         assert entry["folds_compared"] == 7
         assert entry["positive_folds"] == sum(1 for d in expected if d > 0.0)
         assert entry["median_difference"] == pytest.approx(statistics.median(expected))
-        assert (entry["min_difference"], entry["max_difference"]) == (min(expected), max(expected))
+        assert entry["min_difference"] == pytest.approx(min(expected))
+        assert entry["max_difference"] == pytest.approx(max(expected))
     assert paired["1x"]["B0"]["differences"] == pytest.approx(
         [f["net_return"] for f in candidate]
     )  # B-0 earns exactly zero
@@ -1026,7 +1028,7 @@ def test_per_fold_dispersion_reports_min_median_max_of_every_metric() -> None:
         "commission_cost",
         "slippage_cost",
         "cost_burden_fraction",
-        "transaction_cost_bps_of_notional",
+        "transaction_cost_bps_of_execution_notional",
         "daily_volatility",
         "downside_deviation",
         "worst_five_session_return",
@@ -1046,14 +1048,14 @@ def test_per_fold_dispersion_reports_min_median_max_of_every_metric() -> None:
             "undefined_reason",
         }
     # Abstained folds have no execution notional, so that metric is defined for traded folds only.
-    assert dispersion["transaction_cost_bps_of_notional"]["defined_folds"] == 5
+    assert dispersion["transaction_cost_bps_of_execution_notional"]["defined_folds"] == 5
     assert dispersion["round_trips"]["min"] == 0
 
 
 def test_dispersion_of_a_metric_undefined_in_every_fold_is_explicit() -> None:
     result = _evaluate(_inputs(candidate_p=0.1))
     dispersion = result["candidate_aggregate"]["1x"]["dispersion"][
-        "transaction_cost_bps_of_notional"
+        "transaction_cost_bps_of_execution_notional"
     ]
     assert dispersion == {
         "defined_folds": 0,
@@ -1093,12 +1095,32 @@ def test_new_diagnostics_are_aggregate_only_and_add_no_decision_inputs() -> None
 
 def test_cost_rates_are_independent_of_the_callers_decimal_context() -> None:
     expected = [POLICY.side_cost(m) for m in (1, 5, 20)]
+    exact = [POLICY.side_cost_exact(m) for m in (1, 5, 20)]
     share = POLICY.commission_share()
-    with decimal.localcontext() as context:
-        context.prec = 2
-        context.rounding = decimal.ROUND_DOWN
+    hostile = decimal.Context(
+        prec=1,
+        rounding=decimal.ROUND_DOWN,
+        traps=[
+            decimal.Inexact,
+            decimal.Rounded,
+            decimal.InvalidOperation,
+            decimal.DivisionByZero,
+            decimal.Overflow,
+            decimal.Underflow,
+            decimal.Clamped,
+            decimal.Subnormal,
+            decimal.FloatOperation,
+        ],
+    )
+    with decimal.localcontext(hostile):
         assert [POLICY.side_cost(m) for m in (1, 5, 20)] == expected
+        assert [POLICY.side_cost_exact(m) for m in (1, 5, 20)] == exact
         assert POLICY.commission_share() == share
+        parsed = parse_economic_policy(LOCK.read_bytes())
+        assert parsed.side_cost_exact(1) == exact[0]
+    assert exact[0] == fractions.Fraction(3, 80000)  # 0.375 bps, exactly
+    assert exact[1] == 5 * exact[0]
+    assert exact[2] == 20 * exact[0]
     assert expected == pytest.approx([0.375e-4, 1.875e-4, 7.5e-4])
     assert share == pytest.approx(1.0 / 3.0)
 
@@ -1127,3 +1149,137 @@ def test_pinned_policy_files_are_checked_out_with_lf_line_endings() -> None:
     for relative in (eco.ECONOMIC_LOCK_RELATIVE, eco.ECONOMIC_SPEC_RELATIVE):
         assert f"{relative} text eol=lf" in attributes
         assert b"\r" not in (ROOT / relative).read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Exact rational tie handling and execution-notional diagnostics
+# ---------------------------------------------------------------------------
+
+
+def _one_trade_fold(entry: float, exit_: float, multiplier: int = 1) -> eco.FoldSimulation:
+    """One P-A round trip (session 0 -> 5) in a six-session window at a chosen price level."""
+    opens = [entry, entry, entry, entry, entry, exit_]
+    closes = [entry, entry, entry, entry, entry, exit_]
+    return simulate_trades(
+        [(0, 5)],
+        opens,
+        closes,
+        POLICY.side_cost(multiplier),
+        UNITS,
+        annualization_sessions=252,
+        exact_side_cost=POLICY.side_cost_exact(multiplier),
+    )
+
+
+def test_economically_identical_returns_at_different_price_levels_are_exact_ties() -> None:
+    # 130 -> 131.625 and 335 -> 339.1875 are both exactly an 81/80 gross move.
+    low, high = _one_trade_fold(130.0, 131.625), _one_trade_fold(335.0, 339.1875)
+    assert low.exact_gross_multiple == high.exact_gross_multiple == fractions.Fraction(81, 80)
+    assert low.exact_net_multiple == high.exact_net_multiple
+    # Float accounting alone would call this a win for the larger level (last-bit noise).
+    assert high.net_return > low.net_return
+    paired = eco._paired([low] * 7, [high] * 7)
+    assert paired["differences"] == [0.0] * 7
+    assert paired["positive_folds"] == 0
+    assert paired["tied_folds"] == 7
+    assert (paired["median_difference"], paired["median_difference_sign"]) == (0.0, 0)
+    # A scaled price path (any level) ties exactly with the original as well.
+    for scale in (0.5, 2.0, 1024.0):
+        assert _one_trade_fold(100.0 * scale, 103.0 * scale).exact_net_multiple == (
+            _one_trade_fold(100.0, 103.0).exact_net_multiple
+        )
+
+
+def test_genuine_tiny_differences_are_wins_or_losses_even_below_float_resolution() -> None:
+    base = _one_trade_fold(1.0, 1.0 + 2.0**-20)
+    better = _one_trade_fold(1.0, 1.0 + 2.0**-20 + 2.0**-52)  # one ulp more gross return
+    worse = _one_trade_fold(1.0, 1.0 + 2.0**-20 - 2.0**-52)
+    assert better.exact_net_multiple > base.exact_net_multiple > worse.exact_net_multiple
+    gain = eco._paired([better] * 7, [base] * 7)
+    assert (gain["positive_folds"], gain["tied_folds"], gain["median_difference_sign"]) == (7, 0, 1)
+    loss = eco._paired([worse] * 7, [base] * 7)
+    assert (loss["positive_folds"], loss["tied_folds"], loss["median_difference_sign"]) == (
+        0,
+        0,
+        -1,
+    )
+    assert eco._paired([base] * 7, [base] * 7)["median_difference_sign"] == 0
+
+
+def test_a_mix_of_wins_ties_and_losses_is_counted_exactly() -> None:
+    a100, a200 = _one_trade_fold(100.0, 103.0), _one_trade_fold(200.0, 206.0)  # identical +3%
+    b, c = _one_trade_fold(100.0, 102.0), _one_trade_fold(100.0, 104.0)
+    candidate = [a100, b, c, a200, a100, c, b]
+    other = [a200, a100, b, a100, c, c, b]
+    paired = eco._paired(candidate, other)
+    # fold: 0 tie, 1 loss (+2% vs +3%), 2 win (+4% vs +2%), 3 tie, 4 loss, 5 tie, 6 tie
+    assert paired["positive_folds"] == 1
+    assert paired["tied_folds"] == 4
+    assert paired["differences"][0] == paired["differences"][3] == 0.0
+    assert paired["median_difference_sign"] == 0  # sorted: 2 losses, 4 ties, 1 win
+    assert paired["differences"][1] < 0.0 < paired["differences"][2]
+
+
+def test_exact_ties_never_satisfy_the_decisive_paired_rule() -> None:
+    folds = []
+    for index in range(7):
+        scale = 1.0 + index  # every fold has its own price level
+        opens = [100.0 * scale * (1.0 + 0.002 * k) for k in range(ROWS + 5)]
+        probabilities = dict.fromkeys(MODELS, (0.9,) * ROWS)  # every model trades identically
+        folds.append(FoldInput(probabilities, tuple(opens), tuple(opens)))
+    result = _evaluate(folds)
+    for label in ("B2", "B3"):
+        entry = result["paired_benchmark_differences"]["1x"][label]
+        assert entry["positive_folds"] == 0
+        assert entry["tied_folds"] == 7
+        assert entry["median_difference_sign"] == 0
+        assert not _check(result, f"paired_{label}")["passed"]
+    assert result["rule_outcome"] != "ECONOMICALLY_PLAUSIBLE_DESCRIPTIVE"
+
+
+def test_severe_cost_sign_uses_the_exact_median_across_all_folds() -> None:
+    result = _evaluate(_mixed_abstention_inputs(positive=3, negative=2))
+    assert result["candidate_aggregate"]["20x"]["median_net_return_all_folds_sign"] == 0
+    result = _evaluate(_mixed_abstention_inputs(positive=4, negative=1))
+    assert result["candidate_aggregate"]["20x"]["median_net_return_all_folds_sign"] == 1
+    result = _evaluate(_mixed_abstention_inputs(positive=1, negative=4))
+    assert result["candidate_aggregate"]["20x"]["median_net_return_all_folds_sign"] == -1
+    assert not _check(result, "severe_median_all_fold_net_return_positive")["passed"]
+
+
+def test_cost_negation_uses_exact_multiples() -> None:
+    thin = _one_trade_fold(100.0, 100.0 * (1.0 + 2.0**-14))  # gross > 0 but below 0.75 bp costs
+    assert thin.exact_gross_multiple > 1 >= thin.exact_net_multiple
+    flat = _one_trade_fold(100.0, 100.0)
+    assert flat.exact_gross_multiple == 1  # no gross gain: never "cost-negated"
+    assert eco._fold_record(POLICY, thin, True)["cost_negated"] is True
+    assert eco._fold_record(POLICY, flat, True)["cost_negated"] is False
+
+
+def test_exact_net_multiple_agrees_with_the_float_accounting_to_rounding_error() -> None:
+    sim = _one_trade_fold(100.0, 103.0, 5)
+    assert float(sim.exact_net_multiple) - 1.0 == pytest.approx(sim.net_return, rel=1e-12)
+    assert float(sim.exact_gross_multiple) - 1.0 == pytest.approx(sim.gross_return, rel=1e-12)
+    cost = POLICY.side_cost_exact(5)
+    assert sim.exact_net_multiple == fractions.Fraction(103, 100) * (1 - cost) / (1 + cost)
+
+
+def test_cost_bps_use_execution_notional_while_turnover_keeps_reference_notional() -> None:
+    sim = _one_trade_fold(100.0, 110.0)
+    cost = POLICY.side_cost(1)
+    units = UNITS / (100.0 * (1.0 + cost))
+    reference = units * 100.0 + units * 110.0
+    execution = units * 100.0 * (1.0 + cost) + units * 110.0 * (1.0 - cost)
+    assert sim.reference_notional == pytest.approx(reference)
+    assert sim.execution_notional == pytest.approx(execution)
+    assert sim.execution_notional != pytest.approx(sim.reference_notional, rel=1e-9)
+    record = eco._fold_record(POLICY, sim, True)
+    bps = record["transaction_cost_bps_of_execution_notional"]["value"]
+    assert bps == pytest.approx(sim.total_transaction_cost / execution * 10_000.0)
+    assert bps != pytest.approx(sim.total_transaction_cost / reference * 10_000.0, rel=1e-9)
+    assert (record["reference_notional"], record["execution_notional"]) == (
+        sim.reference_notional,
+        sim.execution_notional,
+    )
+    # Frozen accounting is untouched: net return is still the label cost arithmetic.
+    assert sim.net_return == pytest.approx((110.0 * (1 - cost)) / (100.0 * (1 + cost)) - 1.0)
